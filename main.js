@@ -1,11 +1,10 @@
 // main.js — Toilet Sticker (Three.js + Supabase)
-// - Orbit 360° fixe (pas de pan/zoom)
-// - Click guard (clic court, sans drag) pour coller le sticker
-// - Ratio image respecté (pas forcé en carré)
-// - Publish limité par RLS (2 / 24h), compteur affiché
+// - Orbit 360° (pas de pan/zoom)
+// - Collage au click simple (ignore si drag d’Orbit)
+// - Ratio image respecté (plane selon ratio)
+// - Publish limité (2/24h via RLS), compteur affiché
 // - Realtime + fetch initial
-// - Clear mine + Clean all (DELETE all + purge Storage récursive)
-// - Admin bar (Shift + A)
+// - Admin bar (Shift + A) avec Clean all (DELETE all + purge Storage récursive)
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -41,7 +40,6 @@ const sizeRange   = document.getElementById('sizeRange')
 const rotRange    = document.getElementById('rotRange')
 const removeBtn   = document.getElementById('removeBtn')
 const publishBtn  = document.getElementById('publishBtn')
-const clearMineBtn= document.getElementById('clearMine')
 
 // Admin footer bar (Shift + A)
 const adminBar       = document.getElementById('adminBar')
@@ -56,7 +54,7 @@ const adminCleanAllBtn = document.getElementById('adminCleanAll')
 // ---------------- Three.js ----------------
 let scene, camera, renderer, controls, modelRoot
 let stickerTexture = null, stickerMesh = null
-let stickerScale = parseFloat(sizeRange.value)
+let stickerScale = parseFloat(sizeRange?.value ?? '0.35')
 let stickerRotZ  = 0
 let baseQuat = new THREE.Quaternion()
 
@@ -64,7 +62,7 @@ const LS_KEY = 'toilet-sticker-save'
 const liveStickers = new Map()
 const textureCache = new Map()
 
-// IP (pour message côté client)
+// IP (pour affichage client ; la RLS peut fallback sur header côté infra)
 let CLIENT_IP = null, fetchIpPromise = null
 function fetchClientIp(){
   if (CLIENT_IP) return Promise.resolve(CLIENT_IP)
@@ -115,8 +113,8 @@ function init(){
   controls.maxAzimuthAngle = Infinity
 
   addUIEvents()
-  installSimpleClickGuard()
   installAdminHotkey()
+  installClickToPlace()       // <— click simple
 
   loadModel()
 
@@ -140,7 +138,7 @@ function loadModel(){
     modelRoot.traverse(o => { if (o.isMesh){ o.castShadow=true; o.receiveShadow=true } })
     scene.add(modelRoot)
     centerOrbit(modelRoot)
-    status('✅ Ready — pick a file, place, then Publish')
+    status('✅ Ready — pick a file, click a wall, then Publish')
   }, undefined, (e)=>{ console.error(e); status('❌ Model load error') })
 }
 
@@ -168,66 +166,53 @@ function findFloorY(root, c, box){
 
 // ===========================================================
 function addUIEvents(){
-  fileInput.addEventListener('change', (e)=>{
-    const f = e.target.files?.[0]; if(!f) return
-    const url = URL.createObjectURL(f)
-    new THREE.TextureLoader().load(url, (t)=>{
-      t.colorSpace = THREE.SRGBColorSpace
-      t.anisotropy = 8
-      stickerTexture = t
-      status('🖼 Sticker ready — click a wall')
-      if (!stickerMesh) loadSticker(stickerTexture)
+  if (fileInput) {
+    fileInput.addEventListener('change', (e)=>{
+      const f = e.target.files?.[0]; if(!f) return
+      const url = URL.createObjectURL(f)
+      new THREE.TextureLoader().load(url, (t)=>{
+        t.colorSpace = THREE.SRGBColorSpace
+        t.anisotropy = 8
+        stickerTexture = t
+        status('🖼 Sticker ready — click a wall')
+        if (!stickerMesh) loadSticker(stickerTexture)
+      })
     })
-  })
+  }
 
-  sizeRange.addEventListener('input', ()=>{
+  if (sizeRange) sizeRange.addEventListener('input', ()=>{
     stickerScale = parseFloat(sizeRange.value)
     if (stickerMesh){ stickerMesh.scale.set(stickerScale, stickerScale, 1); saveSticker() }
   })
 
-  rotRange.addEventListener('input', ()=>{
+  if (rotRange) rotRange.addEventListener('input', ()=>{
     stickerRotZ = (parseFloat(rotRange.value) * Math.PI) / 180
     if (stickerMesh){ applyStickerRotation(); saveSticker() }
   })
 
-  removeBtn.addEventListener('click', removeLocalSticker)
-  publishBtn.addEventListener('click', publishSticker)
-  clearMineBtn.addEventListener('click', deleteMyStickers)
+  if (removeBtn) removeBtn.addEventListener('click', removeLocalSticker)
+  if (publishBtn) publishBtn.addEventListener('click', publishSticker)
 
   // Admin bar actions
-  adminEnterBtn.addEventListener('click', ()=>{
+  if (adminEnterBtn) adminEnterBtn.addEventListener('click', ()=>{
     const v = adminPassInput.value || ''
     if (v === ADMIN_PASSWORD && ADMIN_PASSWORD !== '') unlockAdminBar()
     else alert('Wrong password')
   })
-  adminCloseBtn.addEventListener('click', ()=> lockAdminBar(true))
-  adminCleanAllBtn.addEventListener('click', deleteAllStickers)
+  if (adminCloseBtn)    adminCloseBtn.addEventListener('click', ()=> lockAdminBar(true))
+  if (adminCleanAllBtn) adminCleanAllBtn.addEventListener('click', deleteAllStickers)
 }
 
-// ---------------- Click guard: clic court, sans mouvement ----------------
-function installSimpleClickGuard(){
-  let downX=0, downY=0, downT=0, moved=false, isOrbiting=false
-  const px = Math.max(6, 6*(window.devicePixelRatio||1))
-  const px2 = px*px
-  const maxDuration = 300
+// ---------------- Collage au click simple (ignore si drag Orbit) ----------
+function installClickToPlace(){
+  let orbitDragging = false
+  controls.addEventListener('start', ()=>{ orbitDragging = true })
+  controls.addEventListener('end',   ()=>{ setTimeout(()=>orbitDragging=false,0) })
 
-  controls.addEventListener('start', ()=>{ isOrbiting=true })
-  controls.addEventListener('end',   ()=>{ isOrbiting=false })
-
-  renderer.domElement.addEventListener('pointerdown', e=>{
-    if (e.button!==0) return
-    downX=e.clientX; downY=e.clientY; downT=performance.now(); moved=false
-  })
-  renderer.domElement.addEventListener('pointermove', e=>{
-    if (moved) return
-    const dx=e.clientX-downX, dy=e.clientY-downY
-    if (dx*dx+dy*dy > px2) moved = true
-  })
-  renderer.domElement.addEventListener('pointerup', e=>{
-    if (e.button!==0) return
-    const dt = performance.now()-downT
-    const dx=e.clientX-downX, dy=e.clientY-downY
-    if (isOrbiting || moved || (dx*dx+dy*dy)>px2 || dt>maxDuration) return
+  renderer.domElement.addEventListener('click', (e)=>{
+    // click gauche uniquement
+    if (e.button !== 0) return
+    if (orbitDragging) return              // on vient de drag → pas de collage
     tryPlaceStickerFromPointer(e)
   })
 }
@@ -328,8 +313,8 @@ function loadSticker(texture){
     const d = JSON.parse(raw)
     stickerMesh = createStickerMeshFromTexture(texture)
     stickerMesh.position.fromArray(d.position)
-    stickerScale = d.scale ?? 0.35; sizeRange.value = String(stickerScale)
-    stickerRotZ  = d.rotZ  ?? 0;    rotRange.value  = String((stickerRotZ*180)/Math.PI)
+    stickerScale = d.scale ?? 0.35; if (sizeRange) sizeRange.value = String(stickerScale)
+    stickerRotZ  = d.rotZ  ?? 0;    if (rotRange)  rotRange.value  = String((stickerRotZ*180)/Math.PI)
     stickerMesh.scale.set(stickerScale, stickerScale, 1)
     if(d.baseQuat){ baseQuat.fromArray(d.baseQuat); applyStickerRotation() }
     else{
@@ -355,7 +340,7 @@ function removeLocalSticker(){
 // ===========================================================
 // PUBLISH (client envoie client_ip ; RLS limite à 2/24h)
 async function publishSticker(){
-  if(!stickerMesh || !fileInput.files?.[0]) return status('⚠️ Pick a file and place it first')
+  if(!stickerMesh || !fileInput?.files?.[0]) return status('⚠️ Pick a file and place it first')
   try{
     lockPublish(false)
     status('Uploading…')
@@ -419,7 +404,7 @@ async function bootstrapLive(){
 function addLiveFromRow(row){
   if (!row?.id || liveStickers.has(row.id)) return
   loadTex(row.image_url, (tex)=>{
-    const g = new THREE.PlaneGeometry(1,1) // legacy (anciens collages carrés)
+    const g = new THREE.PlaneGeometry(1,1) // (anciens collages carrés)
     const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     const mesh = new THREE.Mesh(g,m)
     mesh.position.fromArray(row.position)
@@ -432,53 +417,23 @@ function addLiveFromRow(row){
 }
 
 // ===========================================================
-// DELETE / PURGE
-async function deleteMyStickers(){
-  if (!confirm('Delete all stickers posted by your session?')) return
-  try {
-    // DB
-    const del = await supabase.from(TABLE).delete().eq('session_id', SESSION_ID)
-    if (del.error) throw del.error
-
-    // Storage (dossier de la session)
-    const listing = await supabase.storage.from(BUCKET).list(`users/${SESSION_ID}`, { limit: 1000 })
-    if (!listing.error) {
-      const keys = (listing.data || []).map(it => `users/${SESSION_ID}/${it.name}`)
-      if (keys.length) {
-        const rem = await supabase.storage.from(BUCKET).remove(keys)
-        if (rem.error) throw rem.error
-      }
-    }
-
-    liveStickers.forEach(mesh => scene.remove(mesh))
-    liveStickers.clear()
-    status('🗑️ Your stickers deleted')
-    await bootstrapLive()
-  } catch (e) {
-    console.error('deleteMyStickers', e)
-    status('❌ Error deleting your stickers')
-  }
-}
-
-// >>> Clean all avec fix UUID: not('id','is',null) + purge récursive Storage <<<
+// CLEAN ALL (admin)
 async function deleteAllStickers() {
   if (!confirm('Delete ALL stickers for everyone?')) return
   try {
-    // 1) Delete toutes les lignes (marche pour UUID ou INT)
+    // 1) Delete DB (compatible UUID ou INT)
     const del = await supabase.from(TABLE).delete().not('id', 'is', null)
     if (del.error) { console.error('DB delete error:', del.error); throw del.error }
 
-    // 2) Récupérer toutes les clés storage (récursif)
-    const keys = await listAllStorageKeysRecursive('') // racine
-
-    // 3) Supprimer par paquets
+    // 2) Purge Storage récursive
+    const keys = await listAllStorageKeysRecursive('')
     while (keys.length) {
       const chunk = keys.splice(0, 100)
       const rem = await supabase.storage.from(BUCKET).remove(chunk)
       if (rem.error) { console.error('Storage remove error:', rem.error); throw rem.error }
     }
 
-    // 4) Nettoyage scène
+    // 3) Reset scène
     liveStickers.forEach(mesh => scene.remove(mesh))
     liveStickers.clear()
     status('💥 All stickers purged')
@@ -496,11 +451,10 @@ async function listAllStorageKeysRecursive(prefix) {
 
   for (const item of data || []) {
     const full = prefix ? `${prefix}/${item.name}` : item.name
-    // Si item.id → fichier ; sinon dossier
     if (item.id) {
-      all.push(full)
+      all.push(full)     // fichier
     } else {
-      const sub = await listAllStorageKeysRecursive(full)
+      const sub = await listAllStorageKeysRecursive(full) // dossier
       all.push(...sub)
     }
   }
@@ -568,11 +522,12 @@ async function getTodayCount(){
 async function updatePublishLabel(){
   try{
     const c = await getTodayCount()
-    publishBtn.textContent = `Publish ${Math.min(c,2)}/2`
+    if (publishBtn) publishBtn.textContent = `Publish ${Math.min(c,2)}/2`
   }catch{}
 }
-function lockPublish(enabled){ publishBtn.disabled = !enabled }
+function lockPublish(enabled){ if (publishBtn) publishBtn.disabled = !enabled }
 function cooldownPublish(){
+  if (!publishBtn) return
   publishBtn.disabled = true
   let t=10
   const iv=setInterval(()=>{
