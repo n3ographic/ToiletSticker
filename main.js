@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
-const MODEL_URL = '/toilet_2.glb'
+const MODEL_URL = '/toilet.glb'
 
 // DOM
 const container     = document.getElementById('scene')
