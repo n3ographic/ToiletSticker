@@ -1,7 +1,7 @@
 // main.js — Toilet Sticker (Three.js + Supabase)
 // - Orbit 360° (pas de pan/zoom)
-// - Collage au click simple (ignore si drag d’Orbit)
-// - Ratio image respecté (plane selon ratio)
+// - Collage au click simple : ignore si un drag a eu lieu entre pointerdown et click
+// - Ratio image respecté (plane selon ratio de l’image)
 // - Publish limité (2/24h via RLS), compteur affiché
 // - Realtime + fetch initial
 // - Admin bar (Shift + A) avec Clean all (DELETE all + purge Storage récursive)
@@ -114,7 +114,7 @@ function init(){
 
   addUIEvents()
   installAdminHotkey()
-  installClickToPlace()       // <— click simple
+  installClickToPlace()       // <— click simple robuste
 
   loadModel()
 
@@ -203,25 +203,23 @@ function addUIEvents(){
   if (adminCleanAllBtn) adminCleanAllBtn.addEventListener('click', deleteAllStickers)
 }
 
-// ---------------- Collage au click simple (ignore si drag Orbit) ----------
+// ---------------- Collage au click simple robuste ----------------
+// Logique : si OrbitControls a émis un 'change' entre pointerdown et click,
+// alors il y a eu drag → on n’insère pas. Sinon, on colle.
 function installClickToPlace() {
   let movedSinceDown = false;
 
-  // Reset au down
   renderer.domElement.addEventListener('pointerdown', () => {
     movedSinceDown = false;
   });
 
-  // OrbitControls émet 'change' dès qu'il y a un vrai mouvement de la caméra
   controls.addEventListener('change', () => {
     movedSinceDown = true;
   });
 
-  // Collage au click si AUCUN mouvement depuis le dernier pointerdown
   renderer.domElement.addEventListener('click', (e) => {
-    // On ne bloque pas sur e.button — certains navigateurs ne le remplissent pas sur 'click'
-    if (movedSinceDown) return;     // il y a eu un drag → on ignore
-    tryPlaceStickerFromPointer(e);  // pas de drag → on colle
+    if (movedSinceDown) return;         // un drag a eu lieu → on ignore
+    tryPlaceStickerFromPointer(e);       // pas de drag → on colle
   });
 }
 
@@ -412,7 +410,7 @@ async function bootstrapLive(){
 function addLiveFromRow(row){
   if (!row?.id || liveStickers.has(row.id)) return
   loadTex(row.image_url, (tex)=>{
-    const g = new THREE.PlaneGeometry(1,1) // (anciens collages carrés)
+    const g = new THREE.PlaneGeometry(1,1) // legacy (anciens collages carrés)
     const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     const mesh = new THREE.Mesh(g,m)
     mesh.position.fromArray(row.position)
@@ -425,7 +423,7 @@ function addLiveFromRow(row){
 }
 
 // ===========================================================
-// CLEAN ALL (admin)
+// CLEAN ALL (admin) — DB + Storage récursif
 async function deleteAllStickers() {
   if (!confirm('Delete ALL stickers for everyone?')) return
   try {
