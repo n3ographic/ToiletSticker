@@ -1,10 +1,11 @@
-// Toilet Sticker 3D — Orbit centered + Draco support
+// Toilet Sticker 3D — Orbit centered + Draco + stickers + save
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
-const MODEL_URL = '/toilet.glb' // ⚠️ fichier (sans accents) dans /public
+// ⚠️ Place le fichier binaire dans /public, nom simple (sans accents/espaces)
+const MODEL_URL = '/toilet.glb'
 
 // DOM
 const container     = document.getElementById('scene')
@@ -17,6 +18,7 @@ const centerOrbBtn  = document.getElementById('centerOrbit')
 const removeBtn     = document.getElementById('removeBtn')
 const resetBtn      = document.getElementById('resetBtn')
 
+// Storage key
 const LS_KEY = 'toilet-sticker-orbit-draco'
 
 // Scene state
@@ -61,6 +63,7 @@ function centerCameraOrbit(root, eyeH = 1.2) {
 
   camera.position.set(center.x, floorY + eyeH + 0.4, center.z + radius)
   camera.lookAt(target)
+
   controls.target.copy(target)
   controls.enableZoom = false
   controls.enablePan  = false
@@ -69,6 +72,7 @@ function centerCameraOrbit(root, eyeH = 1.2) {
   controls.minPolarAngle = Math.PI * 0.12
   controls.maxPolarAngle = Math.PI * 0.48
   controls.update()
+
   statusEl.textContent = '📍 Camera centered (Orbit)'
 }
 
@@ -80,6 +84,7 @@ function init() {
   // Scene + cam
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x111111)
+
   const w = window.innerWidth, h = window.innerHeight
   camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100)
   camera.position.set(0, 1.65, 2.6)
@@ -122,38 +127,11 @@ function init() {
     renderer.setSize(W, H)
   })
 
-  // --- GLTF + DRACO loader ---
-  statusEl.textContent = 'Loading model…'
-  const loader = new GLTFLoader()
-  const draco = new DRACOLoader()
-  // ✅ décodeur Draco en CDN (aucun fichier à inclure au déploiement)
-  draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/')
-  loader.setDRACOLoader(draco)
-
-  loader.load(
-    MODEL_URL,
-    (gltf) => {
-      modelRoot = gltf.scene
-      modelRoot.traverse(o => {
-        if (o.isMesh) { o.castShadow = true; o.receiveShadow = true }
-      })
-      scene.add(modelRoot)
-      centerCameraOrbit(modelRoot)
-      statusEl.textContent = '✅ Model loaded — upload un sticker'
-    },
-    undefined,
-    (err) => {
-      console.error('GLTF load error:', err)
-      statusEl.textContent = '❌ Model load error'
-    }
-  )
-
-  // UI
+  // UI listeners
   exposureInput.addEventListener('input', () => {
     renderer.toneMappingExposure = parseFloat(exposureInput.value)
   })
   centerOrbBtn.addEventListener('click', () => modelRoot && centerCameraOrbit(modelRoot))
-
   scaleInput.addEventListener('input', () => {
     stickerScale = parseFloat(scaleInput.value)
     if (stickerMesh) {
@@ -235,11 +213,65 @@ function init() {
     if (Math.abs(normal.y) > 0.6) { statusEl.textContent = '⛔ Place sur un mur'; return }
     normal = snappedWallNormal(normal)
 
+    // petit offset anti z-fight
     const EPS = 0.006
     const point = hit.point.clone().add(normal.clone().multiplyScalar(EPS))
     placeOrMoveSticker(point, normal)
     saveSticker()
   })
+
+  // Charge le modèle (Draco)
+  loadModel()
+}
+
+// ---------- Model Loading (Draco + pré-check réseau) ----------
+async function loadModel() {
+  statusEl.textContent = 'Loading model…'
+
+  // Pré-check réseau (HEAD)
+  try {
+    const head = await fetch(MODEL_URL, { method: 'HEAD' })
+    console.log('[HEAD]', MODEL_URL, head.status, head.headers.get('content-type'))
+    if (!head.ok) {
+      statusEl.textContent = `❌ ${head.status} sur ${MODEL_URL}`
+      return
+    }
+  } catch (e) {
+    console.warn('[HEAD error]', e)
+  }
+
+  // GLTF + DRACO
+  const loader = new GLTFLoader()
+  const draco = new DRACOLoader()
+  draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/')
+  // Si souci réseau/WASM, décommente la ligne suivante :
+  // draco.setDecoderConfig({ type: 'js' })
+  loader.setDRACOLoader(draco)
+
+  loader.load(
+    MODEL_URL,
+    (gltf) => {
+      modelRoot = gltf.scene
+      modelRoot.traverse(o => {
+        if (o.isMesh) { o.castShadow = true; o.receiveShadow = true }
+      })
+      scene.add(modelRoot)
+      centerCameraOrbit(modelRoot)
+      statusEl.textContent = '✅ Model loaded — upload un sticker'
+      console.log('[GLB OK]', MODEL_URL)
+    },
+    (xhr) => {
+      if (xhr.total) {
+        const pct = Math.round((xhr.loaded / xhr.total) * 100)
+        statusEl.textContent = `Loading model… ${pct}%`
+      }
+    },
+    (err) => {
+      console.error('[GLTF load error]', err)
+      const msg = (err && (err.message || err.toString())) || 'Unknown error'
+      statusEl.textContent = `❌ Model load error: ${msg}`
+    }
+  )
 }
 
 // ---------- Stickers ----------
