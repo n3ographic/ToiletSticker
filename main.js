@@ -1,9 +1,10 @@
-// Toilet Sticker 3D — Orbit centered version (no FPS)
+// Toilet Sticker 3D — Orbit centered + Draco support
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
-const MODEL_URL = '/toilet.glb'
+const MODEL_URL = '/toilet.glb' // ⚠️ fichier (sans accents) dans /public
 
 // DOM
 const container     = document.getElementById('scene')
@@ -16,7 +17,7 @@ const centerOrbBtn  = document.getElementById('centerOrbit')
 const removeBtn     = document.getElementById('removeBtn')
 const resetBtn      = document.getElementById('resetBtn')
 
-const LS_KEY = 'toilet-sticker-orbit'
+const LS_KEY = 'toilet-sticker-orbit-draco'
 
 // Scene state
 let scene, camera, renderer, controls
@@ -39,12 +40,10 @@ function snappedWallNormal(worldNormal) {
     ? new THREE.Vector3(Math.sign(n.x) || 1, 0, 0)
     : new THREE.Vector3(0, 0, Math.sign(n.z) || 1)
 }
-
 function getRoomBox(root) {
   root.updateMatrixWorld(true)
   return new THREE.Box3().setFromObject(root)
 }
-
 function findFloorY(root, center, box) {
   const from = new THREE.Vector3(center.x, box.max.y + 0.5, center.z)
   const down = new THREE.Vector3(0, -1, 0)
@@ -52,30 +51,24 @@ function findFloorY(root, center, box) {
   const hits = rc.intersectObjects(root.children, true)
   return hits.length ? hits[0].point.y : box.min.y
 }
-
-// ✅ CENTRAGE ORBIT (tourne autour du centre)
 function centerCameraOrbit(root, eyeH = 1.2) {
   const box = getRoomBox(root)
   const center = box.getCenter(new THREE.Vector3())
   const floorY = findFloorY(root, center, box)
-
   const extent = new THREE.Vector3().subVectors(box.max, box.min)
   const radius = Math.max(extent.x, extent.z) * 0.6
-
   const target = new THREE.Vector3(center.x, floorY + eyeH, center.z)
+
   camera.position.set(center.x, floorY + eyeH + 0.4, center.z + radius)
   camera.lookAt(target)
-
-  if (controls) {
-    controls.target.copy(target)
-    controls.enableZoom = false
-    controls.enablePan  = false
-    controls.minDistance = radius * 0.9
-    controls.maxDistance = radius * 0.9
-    controls.minPolarAngle = Math.PI * 0.12
-    controls.maxPolarAngle = Math.PI * 0.48
-    controls.update()
-  }
+  controls.target.copy(target)
+  controls.enableZoom = false
+  controls.enablePan  = false
+  controls.minDistance = radius * 0.9
+  controls.maxDistance = radius * 0.9
+  controls.minPolarAngle = Math.PI * 0.12
+  controls.maxPolarAngle = Math.PI * 0.48
+  controls.update()
   statusEl.textContent = '📍 Camera centered (Orbit)'
 }
 
@@ -87,7 +80,6 @@ function init() {
   // Scene + cam
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x111111)
-
   const w = window.innerWidth, h = window.innerHeight
   camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100)
   camera.position.set(0, 1.65, 2.6)
@@ -114,7 +106,7 @@ function init() {
   dir.castShadow = true
   scene.add(dir)
 
-  // Orbit controls (rotation only)
+  // Orbit controls
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableZoom = false
   controls.enablePan = false
@@ -130,9 +122,14 @@ function init() {
     renderer.setSize(W, H)
   })
 
-  // Load model
-  const loader = new GLTFLoader()
+  // --- GLTF + DRACO loader ---
   statusEl.textContent = 'Loading model…'
+  const loader = new GLTFLoader()
+  const draco = new DRACOLoader()
+  // ✅ décodeur Draco en CDN (aucun fichier à inclure au déploiement)
+  draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/')
+  loader.setDRACOLoader(draco)
+
   loader.load(
     MODEL_URL,
     (gltf) => {
@@ -141,13 +138,12 @@ function init() {
         if (o.isMesh) { o.castShadow = true; o.receiveShadow = true }
       })
       scene.add(modelRoot)
-      // 👉 Mode ORBIT par défaut
       centerCameraOrbit(modelRoot)
       statusEl.textContent = '✅ Model loaded — upload un sticker'
     },
     undefined,
     (err) => {
-      console.error('[Model error]', err)
+      console.error('GLTF load error:', err)
       statusEl.textContent = '❌ Model load error'
     }
   )
@@ -229,6 +225,7 @@ function init() {
     if (!hits.length) return
     const hit = hits[0]
 
+    // normale locale -> world
     let normal = new THREE.Vector3(0, 0, 1)
     if (hit.face?.normal) {
       normal.copy(hit.face.normal)
@@ -237,6 +234,7 @@ function init() {
     }
     if (Math.abs(normal.y) > 0.6) { statusEl.textContent = '⛔ Place sur un mur'; return }
     normal = snappedWallNormal(normal)
+
     const EPS = 0.006
     const point = hit.point.clone().add(normal.clone().multiplyScalar(EPS))
     placeOrMoveSticker(point, normal)
@@ -283,7 +281,6 @@ function saveSticker() {
   }
   localStorage.setItem(LS_KEY, JSON.stringify(d))
 }
-
 function loadSticker(texture) {
   const raw = localStorage.getItem(LS_KEY)
   if (!raw || !texture) return
