@@ -1,5 +1,4 @@
-// main.js — ToiletSticker (clean complet)
-// Fix rotation locale + quota Supabase 2/jour + anti-drag click
+// main.js — ToiletSticker (360 Orbit + fix + Supabase + anti-drag click)
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -71,20 +70,23 @@ function init() {
   container.appendChild(renderer.domElement)
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.9)
-  hemi.position.set(0,4,0)
-  scene.add(hemi)
-
+  hemi.position.set(0,4,0); scene.add(hemi)
   const dir = new THREE.DirectionalLight(0xffffff, 1.3)
-  dir.position.set(3.5,6,2.2)
-  dir.castShadow = true
-  scene.add(dir)
+  dir.position.set(3.5,6,2.2); dir.castShadow = true; scene.add(dir)
 
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableZoom = false
-  controls.enablePan = false
+  controls.enablePan  = false
   controls.rotateSpeed = 0.55
-  controls.minPolarAngle = Math.PI*0.12
-  controls.maxPolarAngle = Math.PI*0.48
+  controls.enableDamping = true
+  controls.dampingFactor = 0.08
+
+  // 🔓 360° complet autour du point fixe (vertical & horizontal)
+  const EPS = 1e-3
+  controls.minPolarAngle = EPS                  // ~0 rad
+  controls.maxPolarAngle = Math.PI - EPS        // ~π rad
+  controls.minAzimuthAngle = -Infinity
+  controls.maxAzimuthAngle =  Infinity
 
   addUIEvents()
   loadModel()
@@ -122,10 +124,15 @@ function centerOrbit(root, eyeH=1.2){
   const floor = findFloorY(root, c, box)
   const ext = new THREE.Vector3().subVectors(box.max, box.min)
   const r = Math.max(ext.x, ext.z) * 0.6
+
   controls.target.set(c.x, floor + eyeH, c.z)
   camera.position.set(c.x, floor + eyeH + 0.4, c.z + r)
-  controls.minDistance = r*0.9
-  controls.maxDistance = r*0.9
+
+  // 🔒 distance fixe (on reste sur un anneau autour du centre)
+  controls.minDistance = r * 0.9
+  controls.maxDistance = r * 0.9
+
+  // ⚠️ NE PAS réécrire min/max polar ici (on garde le 360° défini dans init)
   controls.update()
 }
 
@@ -168,7 +175,7 @@ function addUIEvents(){
   // --- Click-vs-Drag guard ---
   let downX=0, downY=0, downT=0, moved=false, isOrbiting=false
   controls.addEventListener('start', ()=>isOrbiting=true)
-  controls.addEventListener('end', ()=>isOrbiting=false)
+  controls.addEventListener('end',   ()=>isOrbiting=false)
 
   renderer.domElement.addEventListener('pointerdown', e=>{
     downX=e.clientX; downY=e.clientY; downT=performance.now(); moved=false
@@ -176,13 +183,13 @@ function addUIEvents(){
   renderer.domElement.addEventListener('pointermove', e=>{
     if (moved) return
     const dx=e.clientX-downX, dy=e.clientY-downY
-    if (dx*dx+dy*dy>36) moved=true
+    if (dx*dx+dy*dy>36) moved=true // >6px
   })
   renderer.domElement.addEventListener('pointerup', e=>{
     const dt=performance.now()-downT
     const dx=e.clientX-downX, dy=e.clientY-downY
     const dist2=dx*dx+dy*dy
-    if (isOrbiting || moved || dist2>36 || dt>300) return
+    if (isOrbiting || moved || dist2>36 || dt>300) return // pas un "vrai" clic
     tryPlaceStickerFromPointer(e)
   })
 }
@@ -215,7 +222,7 @@ function tryPlaceStickerFromPointer(ev){
 }
 
 // ===========================================================
-// STICKERS
+// STICKERS (orientation locale stable)
 // ===========================================================
 function snappedWallNormal(n){
   const v=n.clone(); v.y=0
@@ -242,7 +249,7 @@ function placeOrMoveSticker(point, normal){
     stickerMesh.material?.dispose()
   }
   const geom=new THREE.PlaneGeometry(1,1)
-  const mat=new THREE.MeshBasicMaterial({ map:stickerTexture, transparent:true })
+  const mat =new THREE.MeshBasicMaterial({ map:stickerTexture, transparent:true })
   stickerMesh=new THREE.Mesh(geom,mat)
   stickerMesh.position.copy(point)
   stickerMesh.scale.set(stickerScale,stickerScale,1)
@@ -276,19 +283,16 @@ function loadSticker(texture){
   try{
     const d=JSON.parse(raw)
     const geom=new THREE.PlaneGeometry(1,1)
-    const mat=new THREE.MeshBasicMaterial({ map:texture, transparent:true })
+    const mat =new THREE.MeshBasicMaterial({ map:texture, transparent:true })
     stickerMesh=new THREE.Mesh(geom,mat)
     stickerMesh.position.fromArray(d.position)
     stickerScale=d.scale??0.35; sizeRange.value=String(stickerScale)
-    stickerRotZ=d.rotZ??0; rotRange.value=String((stickerRotZ*180)/Math.PI)
+    stickerRotZ =d.rotZ ??0;    rotRange.value =String((stickerRotZ*180)/Math.PI)
     stickerMesh.scale.set(stickerScale,stickerScale,1)
     if(d.baseQuat){ baseQuat.fromArray(d.baseQuat); applyStickerRotation() }
-    else{
-      const qFinal=new THREE.Quaternion().fromArray(d.quaternion)
-      const qRot=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stickerRotZ)
-      baseQuat.copy(qFinal).multiply(qRot.invert())
-      applyStickerRotation()
-    }
+    else{ const qF=new THREE.Quaternion().fromArray(d.quaternion)
+          const qR=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stickerRotZ)
+          baseQuat.copy(qF).multiply(qR.invert()); applyStickerRotation() }
     scene.add(stickerMesh)
   }catch(e){console.warn('Load sticker error',e)}
 }
@@ -305,7 +309,7 @@ function removeLocalSticker(){
 }
 
 // ===========================================================
-// SUPABASE
+// SUPABASE (Storage + INSERT RLS quota 2/j + live)
 // ===========================================================
 async function publishSticker(){
   if(!stickerMesh||!fileInput.files?.[0])return status('⚠️ Pick a file and place it first')
@@ -324,7 +328,7 @@ async function publishSticker(){
       image_url,
       position:stickerMesh.position.toArray(),
       quaternion:stickerMesh.quaternion.toArray(),
-      base_quat:baseQuat.toArray(),
+      base_quat:baseQuat.toArray(), // optionnel si colonne ajoutée
       scale:stickerScale,
       axis:[0,0,1],
       rotz:stickerRotZ
@@ -338,10 +342,10 @@ async function publishSticker(){
     const msg=String(e?.message||e)
     if(msg.includes('violates row-level security')||msg.includes('quota_ok'))
       status('⛔ Limit reached: 2 stickers / 24h')
-    else if(msg.includes('Bucket'))status('⛔ Storage bucket/policy issue')
+    else if(msg.includes('Bucket')) status('⛔ Storage bucket/policy issue')
     else status('❌ Publish error')
     cooldownPublish()
-  }finally{lockPublish(true)}
+  }finally{ lockPublish(true) }
 }
 
 async function bootstrapLive(){
