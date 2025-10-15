@@ -1,6 +1,16 @@
 {
-  "rewrites": [
-    { "source": "/:all*(glb|gltf|bin|png|jpg|jpeg|webp)", "destination": "/:all" },
-    { "source": "/(.*)", "destination": "/" }
-  ]
+  "name": "toilet-sticker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
 }
