@@ -204,17 +204,25 @@ function addUIEvents(){
 }
 
 // ---------------- Collage au click simple (ignore si drag Orbit) ----------
-function installClickToPlace(){
-  let orbitDragging = false
-  controls.addEventListener('start', ()=>{ orbitDragging = true })
-  controls.addEventListener('end',   ()=>{ setTimeout(()=>orbitDragging=false,0) })
+function installClickToPlace() {
+  let movedSinceDown = false;
 
-  renderer.domElement.addEventListener('click', (e)=>{
-    // click gauche uniquement
-    if (e.button !== 0) return
-    if (orbitDragging) return              // on vient de drag → pas de collage
-    tryPlaceStickerFromPointer(e)
-  })
+  // Reset au down
+  renderer.domElement.addEventListener('pointerdown', () => {
+    movedSinceDown = false;
+  });
+
+  // OrbitControls émet 'change' dès qu'il y a un vrai mouvement de la caméra
+  controls.addEventListener('change', () => {
+    movedSinceDown = true;
+  });
+
+  // Collage au click si AUCUN mouvement depuis le dernier pointerdown
+  renderer.domElement.addEventListener('click', (e) => {
+    // On ne bloque pas sur e.button — certains navigateurs ne le remplissent pas sur 'click'
+    if (movedSinceDown) return;     // il y a eu un drag → on ignore
+    tryPlaceStickerFromPointer(e);  // pas de drag → on colle
+  });
 }
 
 // ===========================================================
