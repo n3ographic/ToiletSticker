@@ -1,291 +1,334 @@
-// Toilet Sticker 3D — Orbit centered + robust GLB loader (no-Draco -> Draco fallback)
-import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+// Toilet Sticker 3D — Orbit centered + robust GLB/GLTF/Draco loader
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-// ⚠️ Mets ton fichier binaire dans /public sans accent/espaces
-const MODEL_URL = '/toilet.glb'
+const MODEL_URL = "/toilet.glb"; // ⚠️ Mets ton modèle ici
 
-// DOM
-const container     = document.getElementById('scene')
-const statusEl      = document.getElementById('status')
-const fileInput     = document.getElementById('stickerInput')
-const scaleInput    = document.getElementById('scale')
-const rotInput      = document.getElementById('rotation')
-const exposureInput = document.getElementById('exposure')
-const centerOrbBtn  = document.getElementById('centerOrbit')
-const removeBtn     = document.getElementById('removeBtn')
-const resetBtn      = document.getElementById('resetBtn')
+// DOM elements
+const container = document.getElementById("scene");
+const statusEl = document.getElementById("status");
+const fileInput = document.getElementById("stickerInput");
+const scaleInput = document.getElementById("scale");
+const rotInput = document.getElementById("rotation");
+const exposureInput = document.getElementById("exposure");
+const centerOrbBtn = document.getElementById("centerOrbit");
+const removeBtn = document.getElementById("removeBtn");
+const resetBtn = document.getElementById("resetBtn");
 
-const LS_KEY = 'toilet-sticker-orbit-robust'
+const LS_KEY = "toilet-sticker-data";
 
-// Scene state
-let scene, camera, renderer, controls
-let modelRoot = null
+// Scene
+let scene, camera, renderer, controls, modelRoot;
 
-// Sticker state
-let stickerTexture = null
-let stickerMesh = null
-let stickerScale = parseFloat(scaleInput.value)
-let stickerRotZ = 0
-let stickerAxis = new THREE.Vector3(0, 0, 1)
-let baseQuat = new THREE.Quaternion()
+// Stickers
+let stickerTexture = null;
+let stickerMesh = null;
+let stickerScale = parseFloat(scaleInput.value);
+let stickerRotZ = 0;
+let stickerAxis = new THREE.Vector3(0, 0, 1);
+let baseQuat = new THREE.Quaternion();
 
 // ---------- Helpers ----------
 function snappedWallNormal(worldNormal) {
-  const n = worldNormal.clone(); n.y = 0
-  if (n.lengthSq() < 1e-6) return new THREE.Vector3(0, 0, 1)
-  n.normalize()
+  const n = worldNormal.clone();
+  n.y = 0;
+  if (n.lengthSq() < 1e-6) return new THREE.Vector3(0, 0, 1);
+  n.normalize();
   return Math.abs(n.x) > Math.abs(n.z)
     ? new THREE.Vector3(Math.sign(n.x) || 1, 0, 0)
-    : new THREE.Vector3(0, 0, Math.sign(n.z) || 1)
+    : new THREE.Vector3(0, 0, Math.sign(n.z) || 1);
 }
-function getRoomBox(root) {
-  root.updateMatrixWorld(true)
-  return new THREE.Box3().setFromObject(root)
-}
-function findFloorY(root, center, box) {
-  const from = new THREE.Vector3(center.x, box.max.y + 0.5, center.z)
-  const down = new THREE.Vector3(0, -1, 0)
-  const rc = new THREE.Raycaster(from, down)
-  const hits = rc.intersectObjects(root.children, true)
-  return hits.length ? hits[0].point.y : box.min.y
-}
-function centerCameraOrbit(root, eyeH = 1.2) {
-  const box = getRoomBox(root)
-  const center = box.getCenter(new THREE.Vector3())
-  const floorY = findFloorY(root, center, box)
-  const extent = new THREE.Vector3().subVectors(box.max, box.min)
-  const radius = Math.max(extent.x, extent.z) * 0.6
-  const target = new THREE.Vector3(center.x, floorY + eyeH, center.z)
 
-  camera.position.set(center.x, floorY + eyeH + 0.4, center.z + radius)
-  camera.lookAt(target)
-  controls.target.copy(target)
-  controls.enableZoom = false
-  controls.enablePan  = false
-  controls.minDistance = radius * 0.9
-  controls.maxDistance = radius * 0.9
-  controls.minPolarAngle = Math.PI * 0.12
-  controls.maxPolarAngle = Math.PI * 0.48
-  controls.update()
-  statusEl.textContent = '📍 Camera centered (Orbit)'
+function getRoomBox(root) {
+  root.updateMatrixWorld(true);
+  return new THREE.Box3().setFromObject(root);
+}
+
+function findFloorY(root, center, box) {
+  const from = new THREE.Vector3(center.x, box.max.y + 0.5, center.z);
+  const down = new THREE.Vector3(0, -1, 0);
+  const rc = new THREE.Raycaster(from, down);
+  const hits = rc.intersectObjects(root.children, true);
+  return hits.length ? hits[0].point.y : box.min.y;
+}
+
+function centerCameraOrbit(root, eyeH = 1.2) {
+  const box = getRoomBox(root);
+  const center = box.getCenter(new THREE.Vector3());
+  const floorY = findFloorY(root, center, box);
+  const extent = new THREE.Vector3().subVectors(box.max, box.min);
+  const radius = Math.max(extent.x, extent.z) * 0.6;
+  const target = new THREE.Vector3(center.x, floorY + eyeH, center.z);
+
+  camera.position.set(center.x, floorY + eyeH + 0.4, center.z + radius);
+  camera.lookAt(target);
+  controls.target.copy(target);
+  controls.enableZoom = false;
+  controls.enablePan = false;
+  controls.minPolarAngle = Math.PI * 0.12;
+  controls.maxPolarAngle = Math.PI * 0.48;
+  controls.update();
+  statusEl.textContent = "📍 Camera centrée (Orbit)";
 }
 
 // ---------- Init ----------
-init()
-animate()
+init();
+animate();
 
 function init() {
-  scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x111111)
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x111111);
 
-  const w = window.innerWidth, h = window.innerHeight
-  camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100)
-  camera.position.set(0, 1.65, 2.6)
-  camera.lookAt(0, 1.4, 0)
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100);
+  camera.position.set(0, 1.6, 2.8);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true })
-  renderer.setSize(w, h)
-  if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = parseFloat(exposureInput.value)
-  renderer.physicallyCorrectLights = true
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
-  container.appendChild(renderer.domElement)
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(w, h);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = parseFloat(exposureInput.value);
+  renderer.physicallyCorrectLights = true;
+  renderer.shadowMap.enabled = true;
+  container.appendChild(renderer.domElement);
 
-  // Lights
-  scene.add(new THREE.AmbientLight(0x222222, 0.6))
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x2b2b2b, 0.9); hemi.position.set(0, 4, 0); scene.add(hemi)
-  const dir = new THREE.DirectionalLight(0xffffff, 1.6); dir.position.set(3.5, 6, 2.5); dir.castShadow = true; scene.add(dir)
+  scene.add(new THREE.AmbientLight(0x222222, 0.6));
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x2b2b2b, 0.9);
+  hemi.position.set(0, 4, 0);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 1.6);
+  dir.position.set(3.5, 6, 2.5);
+  dir.castShadow = true;
+  scene.add(dir);
 
-  // Orbit controls
-  controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableZoom = false; controls.enablePan = false; controls.rotateSpeed = 0.5
-  controls.minPolarAngle = Math.PI * 0.12; controls.maxPolarAngle = Math.PI * 0.48
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableZoom = false;
+  controls.enablePan = false;
+  controls.rotateSpeed = 0.5;
 
-  window.addEventListener('resize', () => {
-    const W = window.innerWidth, H = window.innerHeight
-    camera.aspect = W / H; camera.updateProjectionMatrix(); renderer.setSize(W, H)
-  })
+  window.addEventListener("resize", () => {
+    const W = window.innerWidth,
+      H = window.innerHeight;
+    camera.aspect = W / H;
+    camera.updateProjectionMatrix();
+    renderer.setSize(W, H);
+  });
 
   // UI
-  exposureInput.addEventListener('input', () => (renderer.toneMappingExposure = parseFloat(exposureInput.value)))
-  centerOrbBtn.addEventListener('click', () => modelRoot && centerCameraOrbit(modelRoot))
-  scaleInput.addEventListener('input', () => {
-    stickerScale = parseFloat(scaleInput.value)
-    if (stickerMesh) { stickerMesh.scale.set(stickerScale, stickerScale, 1); saveSticker() }
-  })
-  rotInput.addEventListener('input', () => {
-    stickerRotZ = (parseFloat(rotInput.value) * Math.PI) / 180
-    if (stickerMesh) { applyStickerRotation(); saveSticker() }
-  })
-  removeBtn.addEventListener('click', () => {
-    if (stickerMesh) { scene.remove(stickerMesh); stickerMesh.geometry?.dispose(); stickerMesh.material?.dispose(); stickerMesh = null }
-    localStorage.removeItem(LS_KEY); statusEl.textContent = 'Sticker supprimé'
-  })
-  resetBtn.addEventListener('click', () => {
-    scaleInput.value = '0.35'; rotInput.value = '0'; exposureInput.value = '1.2'
-    renderer.toneMappingExposure = 1.2; stickerScale = 0.35; stickerRotZ = 0
-    if (stickerMesh) { stickerMesh.scale.set(stickerScale, stickerScale, 1); applyStickerRotation() }
-    localStorage.removeItem(LS_KEY); statusEl.textContent = 'Réinitialisé'
-  })
+  exposureInput.addEventListener("input", () => {
+    renderer.toneMappingExposure = parseFloat(exposureInput.value);
+  });
 
-  // Upload sticker
-  fileInput.addEventListener('change', (e) => {
-    const file = e.target.files?.[0]; if (!file) return
-    const url = URL.createObjectURL(file)
+  centerOrbBtn.addEventListener("click", () => modelRoot && centerCameraOrbit(modelRoot));
+
+  scaleInput.addEventListener("input", () => {
+    stickerScale = parseFloat(scaleInput.value);
+    if (stickerMesh) {
+      stickerMesh.scale.set(stickerScale, stickerScale, 1);
+      saveSticker();
+    }
+  });
+
+  rotInput.addEventListener("input", () => {
+    stickerRotZ = (parseFloat(rotInput.value) * Math.PI) / 180;
+    if (stickerMesh) {
+      applyStickerRotation();
+      saveSticker();
+    }
+  });
+
+  removeBtn.addEventListener("click", () => {
+    if (stickerMesh) {
+      scene.remove(stickerMesh);
+      stickerMesh.geometry?.dispose();
+      stickerMesh.material?.dispose();
+      stickerMesh = null;
+    }
+    localStorage.removeItem(LS_KEY);
+    statusEl.textContent = "Sticker supprimé";
+  });
+
+  resetBtn.addEventListener("click", () => {
+    scaleInput.value = "0.35";
+    rotInput.value = "0";
+    exposureInput.value = "1.2";
+    renderer.toneMappingExposure = 1.2;
+    stickerScale = 0.35;
+    stickerRotZ = 0;
+    if (stickerMesh) {
+      stickerMesh.scale.set(stickerScale, stickerScale, 1);
+      applyStickerRotation();
+    }
+    localStorage.removeItem(LS_KEY);
+    statusEl.textContent = "Réinitialisé";
+  });
+
+  fileInput.addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
     new THREE.TextureLoader().load(
       url,
-      (tex) => { if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; stickerTexture = tex; statusEl.textContent = '🖼 Sticker prêt — clique un mur'; if (!stickerMesh) loadSticker(stickerTexture) },
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 8;
+        stickerTexture = tex;
+        statusEl.textContent = "🖼 Sticker prêt — clique un mur";
+        if (!stickerMesh) loadSticker(stickerTexture);
+      },
       undefined,
-      () => (statusEl.textContent = '❌ Sticker load error')
-    )
-  })
+      () => (statusEl.textContent = "❌ Sticker load error")
+    );
+  });
 
-  // Click to place
-  const raycaster = new THREE.Raycaster(); const mouse = new THREE.Vector2()
-  renderer.domElement.addEventListener('click', (event) => {
-    if (!stickerTexture) return
-    const rect = renderer.domElement.getBoundingClientRect()
-    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-    raycaster.setFromCamera(mouse, camera)
-    const hits = raycaster.intersectObjects(scene.children, true)
-    if (!hits.length) return
-    const hit = hits[0]
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  renderer.domElement.addEventListener("click", (event) => {
+    if (!stickerTexture) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(scene.children, true);
+    if (!hits.length) return;
+    const hit = hits[0];
 
-    let normal = new THREE.Vector3(0, 0, 1)
-    if (hit.face?.normal) { normal.copy(hit.face.normal); hit.object.updateMatrixWorld(); normal.transformDirection(hit.object.matrixWorld).normalize() }
-    if (Math.abs(normal.y) > 0.6) { statusEl.textContent = '⛔ Place sur un mur'; return }
-    normal = snappedWallNormal(normal)
-    const EPS = 0.006
-    const point = hit.point.clone().add(normal.clone().multiplyScalar(EPS))
-    placeOrMoveSticker(point, normal); saveSticker()
-  })
+    let normal = new THREE.Vector3(0, 0, 1);
+    if (hit.face?.normal) {
+      normal.copy(hit.face.normal);
+      hit.object.updateMatrixWorld();
+      normal.transformDirection(hit.object.matrixWorld).normalize();
+    }
+    if (Math.abs(normal.y) > 0.6) {
+      statusEl.textContent = "⛔ Place sur un mur";
+      return;
+    }
+    normal = snappedWallNormal(normal);
+    const EPS = 0.006;
+    const point = hit.point.clone().add(normal.clone().multiplyScalar(EPS));
+    placeOrMoveSticker(point, normal);
+    saveSticker();
+  });
 
-  // Charge le modèle
-  loadModel()
+  loadModel();
 }
 
-// ---------- Robust model loading (no-Draco -> Draco fallback) ----------
+// ---------- Load Model (GLB/GLTF + Draco fallback) ----------
+function hex32(n) {
+  return "0x" + n.toString(16).padStart(8, "0");
+}
+
 async function loadModel() {
-  statusEl.textContent = 'Loading model…'
+  statusEl.textContent = "Chargement du modèle…";
 
+  let buf;
   try {
-    // Fetch binaire
-    const res = await fetch(MODEL_URL)
-    if (!res.ok) throw new Error(`HTTP ${res.status} on ${MODEL_URL}`)
-    const buf = await res.arrayBuffer()
-
-    // Vérif rapide GLB
-    const dv = new DataView(buf); const GLTF_MAGIC = 0x46546c67
-    if (dv.getUint32(0, true) !== GLTF_MAGIC) console.warn('⚠️ Pas un GLB binaire (magic != glTF). Tentative parse…')
-
-    // Parse SANS Draco (cas GLB simple Polycam)
-    const loaderPlain = new GLTFLoader()
-    await new Promise((resolve, reject) => {
-      loaderPlain.parse(
-        buf, '',
-        (gltf) => { onModelLoaded(gltf); console.log('[GLB OK: no-Draco]'); resolve() },
-        (err) => reject(err)
-      )
-    })
-
-    statusEl.textContent = '✅ Model loaded — upload un sticker'
-    return
-  } catch (err1) {
-    console.warn('[Parse sans Draco a échoué]', err1?.message || err1)
-    statusEl.textContent = '↻ Retrying with Draco…'
+    const res = await fetch(MODEL_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    buf = await res.arrayBuffer();
+  } catch (e) {
+    statusEl.textContent = "❌ Erreur fetch modèle";
+    return;
   }
 
+  const dv = new DataView(buf);
+  const magic = dv.byteLength >= 4 ? dv.getUint32(0, true) : 0;
+  const GLTF_MAGIC = 0x46546c67;
+
   try {
-    // Re-fetch (ou garde buf si tu le stockes globalement)
-    const res2 = await fetch(MODEL_URL)
-    if (!res2.ok) throw new Error(`HTTP ${res2.status} on ${MODEL_URL}`)
-    const buf2 = await res2.arrayBuffer()
-
-    // Parse AVEC Draco
-    const loaderDraco = new GLTFLoader()
-    const draco = new DRACOLoader()
-    draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/')
-    // Si souci réseau/WASM, décommente : draco.setDecoderConfig({ type: 'js' })
-    loaderDraco.setDRACOLoader(draco)
-
-    await new Promise((resolve, reject) => {
-      loaderDraco.parse(
-        buf2, '',
-        (gltf) => { onModelLoaded(gltf); console.log('[GLB OK: Draco]'); resolve() },
-        (err) => reject(err)
-      )
-    })
-
-    statusEl.textContent = '✅ Model loaded — upload un sticker'
-  } catch (err2) {
-    console.error('[GLTF load error after Draco]', err2)
-    const msg = (err2 && (err2.message || err2.toString())) || 'Unknown error'
-    statusEl.textContent = `❌ Model load error: ${msg}`
+    const loader = new GLTFLoader();
+    if (magic !== GLTF_MAGIC) {
+      loader.load(MODEL_URL, (gltf) => {
+        onModelLoaded(gltf);
+      });
+    } else {
+      loader.parse(buf, "", (gltf) => {
+        onModelLoaded(gltf);
+      });
+    }
+  } catch (e) {
+    const draco = new DRACOLoader();
+    draco.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.6/");
+    const loader = new GLTFLoader();
+    loader.setDRACOLoader(draco);
+    loader.parse(buf, "", (gltf) => {
+      onModelLoaded(gltf);
+    });
   }
 }
 
 function onModelLoaded(gltf) {
-  modelRoot = gltf.scene
-  modelRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
-  scene.add(modelRoot)
-  centerCameraOrbit(modelRoot)
+  modelRoot = gltf.scene;
+  modelRoot.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+    }
+  });
+  scene.add(modelRoot);
+  centerCameraOrbit(modelRoot);
+  statusEl.textContent = "✅ Modèle chargé — ajoute ton sticker";
 }
 
 // ---------- Stickers ----------
 function placeOrMoveSticker(point, normal) {
-  if (stickerMesh) { scene.remove(stickerMesh); stickerMesh.geometry?.dispose(); stickerMesh.material?.dispose() }
-  const geom = new THREE.PlaneGeometry(1, 1)
-  const mat  = new THREE.MeshBasicMaterial({ map: stickerTexture, transparent: true })
-  stickerMesh = new THREE.Mesh(geom, mat)
-  stickerMesh.position.copy(point)
-  stickerMesh.scale.set(stickerScale, stickerScale, 1)
-  const quatAlign = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
-  baseQuat.copy(quatAlign); stickerAxis.copy(normal); applyStickerRotation()
-  scene.add(stickerMesh); statusEl.textContent = 'Sticker placé ✓'
-}
-function applyStickerRotation() {
-  if (!stickerMesh) return
-  const rotQuat = new THREE.Quaternion().setFromAxisAngle(stickerAxis, stickerRotZ)
-  stickerMesh.quaternion.copy(baseQuat).multiply(rotQuat)
+  if (stickerMesh) scene.remove(stickerMesh);
+  const geom = new THREE.PlaneGeometry(1, 1);
+  const mat = new THREE.MeshBasicMaterial({ map: stickerTexture, transparent: true });
+  stickerMesh = new THREE.Mesh(geom, mat);
+  stickerMesh.position.copy(point);
+  stickerMesh.scale.set(stickerScale, stickerScale, 1);
+  const quatAlign = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+  baseQuat.copy(quatAlign);
+  stickerAxis.copy(normal);
+  applyStickerRotation();
+  scene.add(stickerMesh);
 }
 
-// ---------- Save / Load ----------
+function applyStickerRotation() {
+  if (!stickerMesh) return;
+  const rotQuat = new THREE.Quaternion().setFromAxisAngle(stickerAxis, stickerRotZ);
+  stickerMesh.quaternion.copy(baseQuat).multiply(rotQuat);
+}
+
 function saveSticker() {
-  if (!stickerMesh) return
+  if (!stickerMesh) return;
   const d = {
     position: stickerMesh.position.toArray(),
     quaternion: stickerMesh.quaternion.toArray(),
     scale: stickerScale,
     rotZ: stickerRotZ,
-    axis: stickerAxis.toArray()
-  }
-  localStorage.setItem(LS_KEY, JSON.stringify(d))
+    axis: stickerAxis.toArray(),
+  };
+  localStorage.setItem(LS_KEY, JSON.stringify(d));
 }
+
 function loadSticker(texture) {
-  const raw = localStorage.getItem(LS_KEY); if (!raw || !texture) return
+  const raw = localStorage.getItem(LS_KEY);
+  if (!raw || !texture) return;
   try {
-    const d = JSON.parse(raw)
-    const geom = new THREE.PlaneGeometry(1, 1)
-    const mat  = new THREE.MeshBasicMaterial({ map: texture, transparent: true })
-    stickerMesh = new THREE.Mesh(geom, mat)
-    stickerMesh.position.fromArray(d.position)
-    stickerMesh.quaternion.fromArray(d.quaternion)
-    stickerScale = d.scale ?? 0.35; stickerRotZ = d.rotZ ?? 0
-    stickerAxis.fromArray(d.axis ?? [0, 0, 1])
-    stickerMesh.scale.set(stickerScale, stickerScale, 1)
-    scene.add(stickerMesh); statusEl.textContent = '🧷 Sticker restauré'
-  } catch (e) { console.warn('Load error', e) }
+    const d = JSON.parse(raw);
+    const geom = new THREE.PlaneGeometry(1, 1);
+    const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+    stickerMesh = new THREE.Mesh(geom, mat);
+    stickerMesh.position.fromArray(d.position);
+    stickerMesh.quaternion.fromArray(d.quaternion);
+    stickerScale = d.scale ?? 0.35;
+    stickerRotZ = d.rotZ ?? 0;
+    stickerAxis.fromArray(d.axis ?? [0, 0, 1]);
+    stickerMesh.scale.set(stickerScale, stickerScale, 1);
+    scene.add(stickerMesh);
+  } catch (e) {
+    console.warn("Erreur chargement sticker", e);
+  }
 }
 
 // ---------- Loop ----------
 function animate() {
-  requestAnimationFrame(animate)
-  controls?.update()
-  renderer.render(scene, camera)
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
 }
