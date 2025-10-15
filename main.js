@@ -1,4 +1,5 @@
-// Clean UI version — Three.js + Supabase (quota 2/jour, publish x/2)
+// main.js — ToiletSticker (clean) : Three.js + Supabase + quota 2/jour
+// UI attendu (ids) : stickerInput, sizeRange, rotRange, removeBtn, publishBtn, status, scene
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -7,8 +8,8 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { createClient } from '@supabase/supabase-js'
 
-// ===== ENV / CONFIG =====
-const MODEL_URL = '/toilet.glb' // ton modèle (meshopt/draco ok)
+// ---------- ENV / CONFIG ----------
+const MODEL_URL = '/toilet.glb' // modèle draco/meshopt hébergé chez toi
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON
@@ -16,7 +17,7 @@ const supabase = createClient(
 const BUCKET = 'stickers'
 const TABLE  = 'stickers'
 
-// ===== Session persistée (pour quota) =====
+// ---------- SESSION persistée (sert pour le quota SQL) ----------
 function getOrCreateSessionId() {
   const KEY = 'TOILET_SESSION_ID'
   let id = localStorage.getItem(KEY)
@@ -25,7 +26,7 @@ function getOrCreateSessionId() {
 }
 const SESSION_ID = getOrCreateSessionId()
 
-// ===== DOM =====
+// ---------- DOM ----------
 const container  = document.getElementById('scene')
 const statusEl   = document.getElementById('status')
 const fileInput  = document.getElementById('stickerInput')
@@ -34,27 +35,28 @@ const rotRange   = document.getElementById('rotRange')
 const removeBtn  = document.getElementById('removeBtn')
 const publishBtn = document.getElementById('publishBtn')
 
-// ===== Three.js state =====
+// ---------- Three state ----------
 let scene, camera, renderer, controls, modelRoot
 let stickerTexture = null, stickerMesh = null
 let stickerScale = parseFloat(sizeRange.value)
-let stickerRotZ = 0
-let stickerAxis = new THREE.Vector3(0,0,1)
-let baseQuat = new THREE.Quaternion()
+let stickerRotZ   = 0 // radians
+let baseQuat      = new THREE.Quaternion() // orientation "mur" (sans la rotation du slider)
 
 const LS_KEY = 'toilet-sticker-save'
-const liveStickers = new Map()
-const textureCache = new Map()
+const liveStickers = new Map()    // id -> mesh
+const textureCache = new Map()    // url -> texture
 
-// ===== Boot =====
+// ---------- Boot ----------
 init()
 animate()
 bootstrapLive().then(updatePublishLabel).catch(console.warn)
 
-// ===== Init Scene =====
-function init(){
+// ========================================
+// Scene / UI
+// ========================================
+function init() {
   scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x0e0e0e)
+  scene.background = new THREE.Color(0x000000)
 
   const w = innerWidth, h = innerHeight
   camera = new THREE.PerspectiveCamera(60, w/h, 0.1, 150)
@@ -70,7 +72,7 @@ function init(){
   container.appendChild(renderer.domElement)
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.9); hemi.position.set(0,4,0); scene.add(hemi)
-  const dir = new THREE.DirectionalLight(0xffffff, 1.3); dir.position.set(3.5,6,2.2); dir.castShadow = true; scene.add(dir)
+  const dir  = new THREE.DirectionalLight(0xffffff, 1.3); dir.position.set(3.5,6,2.2); dir.castShadow = true; scene.add(dir)
 
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableZoom = false; controls.enablePan = false; controls.rotateSpeed = 0.55
@@ -80,7 +82,7 @@ function init(){
   loadModel()
 
   addEventListener('resize', () => {
-    camera.aspect = innerWidth/innerHeight
+    camera.aspect = innerWidth / innerHeight
     camera.updateProjectionMatrix()
     renderer.setSize(innerWidth, innerHeight)
   })
@@ -103,34 +105,41 @@ function addUIEvents(){
     stickerScale = parseFloat(sizeRange.value)
     if (stickerMesh) { stickerMesh.scale.set(stickerScale, stickerScale, 1); saveSticker() }
   })
+
   rotRange.addEventListener('input', () => {
     stickerRotZ = (parseFloat(rotRange.value) * Math.PI) / 180
     if (stickerMesh) { applyStickerRotation(); saveSticker() }
   })
+
   removeBtn.addEventListener('click', removeLocalSticker)
   publishBtn.addEventListener('click', publishSticker)
 
-  // placer par clic
+  // clic pour placer
   const ray = new THREE.Raycaster(), mouse = new THREE.Vector2()
   renderer.domElement.addEventListener('click', (ev) => {
     if (!stickerTexture) return
     const rect = renderer.domElement.getBoundingClientRect()
-    mouse.x = ((ev.clientX-rect.left)/rect.width)*2-1
-    mouse.y = -((ev.clientY-rect.top)/rect.height)*2+1
+    mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
+    mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1
     ray.setFromCamera(mouse, camera)
     const hits = ray.intersectObjects(scene.children, true)
     if (!hits.length) return
     const hit = hits[0]
 
+    // normale monde
     let n = new THREE.Vector3(0,0,1)
     if (hit.face?.normal) {
       n.copy(hit.face.normal)
       hit.object.updateMatrixWorld()
       n.transformDirection(hit.object.matrixWorld).normalize()
     }
+    // évite sol/plafond : on ne colle que sur murs
     if (Math.abs(n.y) > 0.6) return status('⛔ Place sur un mur')
-    n = snapWall(n)
 
+    // snap sur axes X/Z pour stabiliser sur scans polycam
+    n = snappedWallNormal(n)
+
+    // léger offset pour éviter z-fighting
     const EPS = 0.006
     const p = hit.point.clone().add(n.clone().multiplyScalar(EPS))
     placeOrMoveSticker(p, n)
@@ -148,7 +157,7 @@ function loadModel(){
 
   loader.load(MODEL_URL, (gltf)=>{
     modelRoot = gltf.scene
-    modelRoot.traverse(o=>{ if (o.isMesh){ o.castShadow = true; o.receiveShadow = true }})
+    modelRoot.traverse(o => { if (o.isMesh){ o.castShadow = true; o.receiveShadow = true } })
     scene.add(modelRoot)
     centerOrbit(modelRoot)
     status('✅ Ready — pick a file, place, then Publish')
@@ -161,20 +170,23 @@ function centerOrbit(root, eyeH=1.2){
   const floor = findFloorY(root, c, box)
   const ext = new THREE.Vector3().subVectors(box.max, box.min)
   const r = Math.max(ext.x, ext.z) * 0.6
-  controls.target.set(c.x, floor+eyeH, c.z)
-  camera.position.set(c.x, floor+eyeH+0.4, c.z + r)
+  controls.target.set(c.x, floor + eyeH, c.z)
+  camera.position.set(c.x, floor + eyeH + 0.4, c.z + r)
   controls.minDistance = r*0.9; controls.maxDistance = r*0.9
   controls.update()
 }
+
 function findFloorY(root, c, box){
-  const from = new THREE.Vector3(c.x, box.max.y+0.5, c.z)
+  const from = new THREE.Vector3(c.x, box.max.y + 0.5, c.z)
   const rc = new THREE.Raycaster(from, new THREE.Vector3(0,-1,0))
   const hits = rc.intersectObjects(root.children, true)
   return hits.length ? hits[0].point.y : box.min.y
 }
 
-// ===== Sticker helpers =====
-function snapWall(n){
+// ========================================
+// Stickers (orientation fixée par base locale)
+// ========================================
+function snappedWallNormal(n){
   const v = n.clone(); v.y = 0
   if (v.lengthSq() < 1e-6) return new THREE.Vector3(0,0,1)
   v.normalize()
@@ -182,59 +194,103 @@ function snapWall(n){
     ? new THREE.Vector3(Math.sign(v.x)||1,0,0)
     : new THREE.Vector3(0,0,Math.sign(v.z)||1)
 }
+
+// Construit une base locale (tangent, bitangent, normal) → quaternion
+function makeStickerQuaternion(normal){
+  const n = normal.clone().normalize()
+  const worldUp = Math.abs(n.y) > 0.9 ? new THREE.Vector3(1,0,0) : new THREE.Vector3(0,1,0)
+  const tangent   = worldUp.clone().cross(n).normalize()      // X
+  const bitangent = n.clone().cross(tangent).normalize()      // Y
+  const m = new THREE.Matrix4().makeBasis(tangent, bitangent, n)
+  return new THREE.Quaternion().setFromRotationMatrix(m)
+}
+
 function placeOrMoveSticker(point, normal){
-  if (stickerMesh){ scene.remove(stickerMesh); stickerMesh.geometry?.dispose(); stickerMesh.material?.dispose() }
+  if (stickerMesh) {
+    scene.remove(stickerMesh)
+    stickerMesh.geometry?.dispose()
+    stickerMesh.material?.dispose()
+  }
   const geom = new THREE.PlaneGeometry(1,1)
   const mat  = new THREE.MeshBasicMaterial({ map: stickerTexture, transparent: true })
   stickerMesh = new THREE.Mesh(geom, mat)
   stickerMesh.position.copy(point)
   stickerMesh.scale.set(stickerScale, stickerScale, 1)
-  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), normal)
-  baseQuat.copy(q); stickerAxis.copy(normal); applyStickerRotation()
+
+  // base "mur" stable
+  baseQuat = makeStickerQuaternion(normal)
+  stickerMesh.quaternion.copy(baseQuat)
+
+  // applique la rotation utilisateur autour de Z LOCAL
+  applyStickerRotation()
+
   scene.add(stickerMesh)
   status('Sticker placed ✓ — Publish to share')
 }
+
 function applyStickerRotation(){
   if (!stickerMesh) return
-  const rot = new THREE.Quaternion().setFromAxisAngle(stickerAxis, stickerRotZ)
-  stickerMesh.quaternion.copy(baseQuat).multiply(rot)
+  // repartir de la base, puis tourner localement autour de Z
+  stickerMesh.quaternion.copy(baseQuat)
+  stickerMesh.rotateOnAxis(new THREE.Vector3(0,0,1), stickerRotZ)
 }
+
 function saveSticker(){
   if (!stickerMesh) return
   const d = {
-    position: stickerMesh.position.toArray(),
-    quaternion: stickerMesh.quaternion.toArray(),
-    scale: stickerScale,
-    rotZ: stickerRotZ,
-    axis: stickerAxis.toArray(),
+    position:   stickerMesh.position.toArray(),
+    quaternion: stickerMesh.quaternion.toArray(), // orientation finale (utile si juste affichage)
+    baseQuat:   baseQuat.toArray(),               // pour garder un slider correct au reload
+    scale:      stickerScale,
+    rotZ:       stickerRotZ
   }
   localStorage.setItem(LS_KEY, JSON.stringify(d))
 }
-function loadSticker(tex){
-  const raw = localStorage.getItem(LS_KEY); if (!raw || !tex) return
-  try{
+
+function loadSticker(texture){
+  const raw = localStorage.getItem(LS_KEY); if (!raw || !texture) return
+  try {
     const d = JSON.parse(raw)
-    const g = new THREE.PlaneGeometry(1,1)
-    const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
-    stickerMesh = new THREE.Mesh(g, m)
+    const geom = new THREE.PlaneGeometry(1,1)
+    const mat  = new THREE.MeshBasicMaterial({ map: texture, transparent: true })
+    stickerMesh = new THREE.Mesh(geom, mat)
     stickerMesh.position.fromArray(d.position)
-    stickerMesh.quaternion.fromArray(d.quaternion)
     stickerScale = d.scale ?? 0.35; sizeRange.value = String(stickerScale)
-    stickerRotZ  = d.rotZ  ?? 0;    rotRange.value  = String((stickerRotZ*180)/Math.PI)
-    stickerAxis.fromArray(d.axis ?? [0,0,1])
+    stickerRotZ  = d.rotZ  ?? 0;   rotRange.value  = String((stickerRotZ*180)/Math.PI)
     stickerMesh.scale.set(stickerScale, stickerScale, 1)
+
+    if (d.baseQuat) {
+      baseQuat.fromArray(d.baseQuat)
+      applyStickerRotation()
+    } else {
+      // rétrocompat : approx base = qFinal * inv(rotZ_local)
+      const qFinal = new THREE.Quaternion().fromArray(d.quaternion)
+      const qRot   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), stickerRotZ)
+      baseQuat.copy(qFinal).multiply(qRot.invert())
+      applyStickerRotation()
+    }
+
     scene.add(stickerMesh)
-  }catch(e){ console.warn('loadSticker error', e) }
+  } catch(e){ console.warn('Load sticker error', e) }
 }
+
 function removeLocalSticker(){
-  if (stickerMesh){ scene.remove(stickerMesh); stickerMesh.geometry?.dispose(); stickerMesh.material?.dispose(); stickerMesh = null }
+  if (stickerMesh){
+    scene.remove(stickerMesh)
+    stickerMesh.geometry?.dispose()
+    stickerMesh.material?.dispose()
+    stickerMesh = null
+  }
   localStorage.removeItem(LS_KEY)
   status('Sticker removed')
 }
 
-// ===== Supabase: live + publish (quota côté SQL) =====
+// ========================================
+// Supabase : publish (Storage + INSERT RLS) + live + quota
+// ========================================
 async function publishSticker(){
   if (!stickerMesh || !fileInput.files?.[0]) return status('⚠️ Pick a file and place it first')
+
   try{
     lockPublish(false)
     status('Uploading…')
@@ -243,7 +299,7 @@ async function publishSticker(){
     const path = `users/${SESSION_ID}/${Date.now()}.${ext}`
 
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
-      upsert:true, contentType:file.type
+      upsert:true, contentType: file.type
     })
     if (upErr) throw upErr
 
@@ -253,12 +309,14 @@ async function publishSticker(){
     const row = {
       session_id: SESSION_ID,
       image_url,
-      position: stickerMesh.position.toArray(),
+      position:   stickerMesh.position.toArray(),
       quaternion: stickerMesh.quaternion.toArray(),
-      scale: stickerScale,
-      axis: stickerAxis.toArray(),
-      rotz: stickerRotZ
+      base_quat:  baseQuat.toArray(),  // si tu as ajouté cette colonne (optionnel)
+      scale:      stickerScale,
+      axis:       [0,0,1],             // legacy, pas indispensable
+      rotz:       stickerRotZ
     }
+
     const { error: insErr } = await supabase.from(TABLE).insert(row)
     if (insErr) throw insErr
 
@@ -272,7 +330,6 @@ async function publishSticker(){
     else if (msg.includes('Bucket')) status('⛔ Storage bucket/policy issue')
     else status('❌ Publish error')
 
-    // petit cooldown UI pour éviter le spam
     cooldownPublish()
   } finally {
     lockPublish(true)
@@ -290,7 +347,6 @@ async function bootstrapLive(){
     .channel('stickers-live')
     .on('postgres_changes', { event:'INSERT', schema:'public', table:TABLE }, (payload)=>{
       addLiveFromRow(payload.new)
-      // si c'est ta session, maj label x/2
       if (payload.new?.session_id === SESSION_ID) updatePublishLabel()
     })
     .subscribe()
@@ -310,7 +366,9 @@ function addLiveFromRow(row){
   })
 }
 
-// ===== Helpers: textures / status / publish label =====
+// ========================================
+// Helpers UI / textures / quota label
+// ========================================
 function loadTex(url, cb){
   if (textureCache.has(url)) return cb(textureCache.get(url))
   new THREE.TextureLoader().load(url, (t)=>{
@@ -329,6 +387,7 @@ async function getTodayCount(){
     .eq('session_id', SESSION_ID)
   return res?.count ?? 0
 }
+
 async function updatePublishLabel(){
   try{
     const c = await getTodayCount()
@@ -346,5 +405,7 @@ function cooldownPublish(){
   }, 1000)
 }
 
-// ===== Render loop =====
+// ========================================
+// Render loop
+// ========================================
 function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera) }
