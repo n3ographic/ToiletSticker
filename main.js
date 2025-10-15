@@ -1,10 +1,10 @@
-// Toilet Sticker 3D — Orbit centered + Draco + stickers + save
+// Toilet Sticker 3D — Orbit centered + robust GLB loader (no-Draco -> Draco fallback)
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
-// ⚠️ Place le fichier binaire dans /public, nom simple (sans accents/espaces)
+// ⚠️ Mets ton fichier binaire dans /public sans accent/espaces
 const MODEL_URL = '/toilet.glb'
 
 // DOM
@@ -18,8 +18,7 @@ const centerOrbBtn  = document.getElementById('centerOrbit')
 const removeBtn     = document.getElementById('removeBtn')
 const resetBtn      = document.getElementById('resetBtn')
 
-// Storage key
-const LS_KEY = 'toilet-sticker-orbit-draco'
+const LS_KEY = 'toilet-sticker-orbit-robust'
 
 // Scene state
 let scene, camera, renderer, controls
@@ -63,7 +62,6 @@ function centerCameraOrbit(root, eyeH = 1.2) {
 
   camera.position.set(center.x, floorY + eyeH + 0.4, center.z + radius)
   camera.lookAt(target)
-
   controls.target.copy(target)
   controls.enableZoom = false
   controls.enablePan  = false
@@ -72,7 +70,6 @@ function centerCameraOrbit(root, eyeH = 1.2) {
   controls.minPolarAngle = Math.PI * 0.12
   controls.maxPolarAngle = Math.PI * 0.48
   controls.update()
-
   statusEl.textContent = '📍 Camera centered (Orbit)'
 }
 
@@ -81,7 +78,6 @@ init()
 animate()
 
 function init() {
-  // Scene + cam
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x111111)
 
@@ -90,7 +86,6 @@ function init() {
   camera.position.set(0, 1.65, 2.6)
   camera.lookAt(0, 1.4, 0)
 
-  // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setSize(w, h)
   if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -103,96 +98,55 @@ function init() {
 
   // Lights
   scene.add(new THREE.AmbientLight(0x222222, 0.6))
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x2b2b2b, 0.9)
-  hemi.position.set(0, 4, 0)
-  scene.add(hemi)
-  const dir = new THREE.DirectionalLight(0xffffff, 1.6)
-  dir.position.set(3.5, 6, 2.5)
-  dir.castShadow = true
-  scene.add(dir)
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x2b2b2b, 0.9); hemi.position.set(0, 4, 0); scene.add(hemi)
+  const dir = new THREE.DirectionalLight(0xffffff, 1.6); dir.position.set(3.5, 6, 2.5); dir.castShadow = true; scene.add(dir)
 
   // Orbit controls
   controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableZoom = false
-  controls.enablePan = false
-  controls.rotateSpeed = 0.5
-  controls.minPolarAngle = Math.PI * 0.12
-  controls.maxPolarAngle = Math.PI * 0.48
+  controls.enableZoom = false; controls.enablePan = false; controls.rotateSpeed = 0.5
+  controls.minPolarAngle = Math.PI * 0.12; controls.maxPolarAngle = Math.PI * 0.48
 
-  // Resize
   window.addEventListener('resize', () => {
     const W = window.innerWidth, H = window.innerHeight
-    camera.aspect = W / H
-    camera.updateProjectionMatrix()
-    renderer.setSize(W, H)
+    camera.aspect = W / H; camera.updateProjectionMatrix(); renderer.setSize(W, H)
   })
 
-  // UI listeners
-  exposureInput.addEventListener('input', () => {
-    renderer.toneMappingExposure = parseFloat(exposureInput.value)
-  })
+  // UI
+  exposureInput.addEventListener('input', () => (renderer.toneMappingExposure = parseFloat(exposureInput.value)))
   centerOrbBtn.addEventListener('click', () => modelRoot && centerCameraOrbit(modelRoot))
   scaleInput.addEventListener('input', () => {
     stickerScale = parseFloat(scaleInput.value)
-    if (stickerMesh) {
-      stickerMesh.scale.set(stickerScale, stickerScale, 1)
-      saveSticker()
-    }
+    if (stickerMesh) { stickerMesh.scale.set(stickerScale, stickerScale, 1); saveSticker() }
   })
   rotInput.addEventListener('input', () => {
     stickerRotZ = (parseFloat(rotInput.value) * Math.PI) / 180
-    if (stickerMesh) {
-      applyStickerRotation()
-      saveSticker()
-    }
+    if (stickerMesh) { applyStickerRotation(); saveSticker() }
   })
   removeBtn.addEventListener('click', () => {
-    if (stickerMesh) {
-      scene.remove(stickerMesh)
-      stickerMesh.geometry?.dispose()
-      stickerMesh.material?.dispose()
-      stickerMesh = null
-    }
-    localStorage.removeItem(LS_KEY)
-    statusEl.textContent = 'Sticker supprimé'
+    if (stickerMesh) { scene.remove(stickerMesh); stickerMesh.geometry?.dispose(); stickerMesh.material?.dispose(); stickerMesh = null }
+    localStorage.removeItem(LS_KEY); statusEl.textContent = 'Sticker supprimé'
   })
   resetBtn.addEventListener('click', () => {
-    scaleInput.value = '0.35'
-    rotInput.value = '0'
-    exposureInput.value = '1.2'
-    renderer.toneMappingExposure = 1.2
-    stickerScale = 0.35
-    stickerRotZ = 0
-    if (stickerMesh) {
-      stickerMesh.scale.set(stickerScale, stickerScale, 1)
-      applyStickerRotation()
-    }
-    localStorage.removeItem(LS_KEY)
-    statusEl.textContent = 'Réinitialisé'
+    scaleInput.value = '0.35'; rotInput.value = '0'; exposureInput.value = '1.2'
+    renderer.toneMappingExposure = 1.2; stickerScale = 0.35; stickerRotZ = 0
+    if (stickerMesh) { stickerMesh.scale.set(stickerScale, stickerScale, 1); applyStickerRotation() }
+    localStorage.removeItem(LS_KEY); statusEl.textContent = 'Réinitialisé'
   })
 
   // Upload sticker
   fileInput.addEventListener('change', (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0]; if (!file) return
     const url = URL.createObjectURL(file)
     new THREE.TextureLoader().load(
       url,
-      (tex) => {
-        if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace
-        tex.anisotropy = 8
-        stickerTexture = tex
-        statusEl.textContent = '🖼 Sticker prêt — clique un mur'
-        if (!stickerMesh) loadSticker(stickerTexture)
-      },
+      (tex) => { if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; stickerTexture = tex; statusEl.textContent = '🖼 Sticker prêt — clique un mur'; if (!stickerMesh) loadSticker(stickerTexture) },
       undefined,
-      () => statusEl.textContent = '❌ Sticker load error'
+      () => (statusEl.textContent = '❌ Sticker load error')
     )
   })
 
   // Click to place
-  const raycaster = new THREE.Raycaster()
-  const mouse = new THREE.Vector2()
+  const raycaster = new THREE.Raycaster(); const mouse = new THREE.Vector2()
   renderer.domElement.addEventListener('click', (event) => {
     if (!stickerTexture) return
     const rect = renderer.domElement.getBoundingClientRect()
@@ -203,98 +157,98 @@ function init() {
     if (!hits.length) return
     const hit = hits[0]
 
-    // normale locale -> world
     let normal = new THREE.Vector3(0, 0, 1)
-    if (hit.face?.normal) {
-      normal.copy(hit.face.normal)
-      hit.object.updateMatrixWorld()
-      normal.transformDirection(hit.object.matrixWorld).normalize()
-    }
+    if (hit.face?.normal) { normal.copy(hit.face.normal); hit.object.updateMatrixWorld(); normal.transformDirection(hit.object.matrixWorld).normalize() }
     if (Math.abs(normal.y) > 0.6) { statusEl.textContent = '⛔ Place sur un mur'; return }
     normal = snappedWallNormal(normal)
-
-    // petit offset anti z-fight
     const EPS = 0.006
     const point = hit.point.clone().add(normal.clone().multiplyScalar(EPS))
-    placeOrMoveSticker(point, normal)
-    saveSticker()
+    placeOrMoveSticker(point, normal); saveSticker()
   })
 
-  // Charge le modèle (Draco)
+  // Charge le modèle
   loadModel()
 }
 
-// ---------- Model Loading (Draco + pré-check réseau) ----------
+// ---------- Robust model loading (no-Draco -> Draco fallback) ----------
 async function loadModel() {
   statusEl.textContent = 'Loading model…'
 
-  // Pré-check réseau (HEAD)
   try {
-    const head = await fetch(MODEL_URL, { method: 'HEAD' })
-    console.log('[HEAD]', MODEL_URL, head.status, head.headers.get('content-type'))
-    if (!head.ok) {
-      statusEl.textContent = `❌ ${head.status} sur ${MODEL_URL}`
-      return
-    }
-  } catch (e) {
-    console.warn('[HEAD error]', e)
+    // Fetch binaire
+    const res = await fetch(MODEL_URL)
+    if (!res.ok) throw new Error(`HTTP ${res.status} on ${MODEL_URL}`)
+    const buf = await res.arrayBuffer()
+
+    // Vérif rapide GLB
+    const dv = new DataView(buf); const GLTF_MAGIC = 0x46546c67
+    if (dv.getUint32(0, true) !== GLTF_MAGIC) console.warn('⚠️ Pas un GLB binaire (magic != glTF). Tentative parse…')
+
+    // Parse SANS Draco (cas GLB simple Polycam)
+    const loaderPlain = new GLTFLoader()
+    await new Promise((resolve, reject) => {
+      loaderPlain.parse(
+        buf, '',
+        (gltf) => { onModelLoaded(gltf); console.log('[GLB OK: no-Draco]'); resolve() },
+        (err) => reject(err)
+      )
+    })
+
+    statusEl.textContent = '✅ Model loaded — upload un sticker'
+    return
+  } catch (err1) {
+    console.warn('[Parse sans Draco a échoué]', err1?.message || err1)
+    statusEl.textContent = '↻ Retrying with Draco…'
   }
 
-  // GLTF + DRACO
-  const loader = new GLTFLoader()
-  const draco = new DRACOLoader()
+  try {
+    // Re-fetch (ou garde buf si tu le stockes globalement)
+    const res2 = await fetch(MODEL_URL)
+    if (!res2.ok) throw new Error(`HTTP ${res2.status} on ${MODEL_URL}`)
+    const buf2 = await res2.arrayBuffer()
 
-  // Si souci réseau/WASM, décommente la ligne suivante :
-  // draco.setDecoderConfig({ type: 'js' })
+    // Parse AVEC Draco
+    const loaderDraco = new GLTFLoader()
+    const draco = new DRACOLoader()
+    draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/')
+    // Si souci réseau/WASM, décommente : draco.setDecoderConfig({ type: 'js' })
+    loaderDraco.setDRACOLoader(draco)
 
+    await new Promise((resolve, reject) => {
+      loaderDraco.parse(
+        buf2, '',
+        (gltf) => { onModelLoaded(gltf); console.log('[GLB OK: Draco]'); resolve() },
+        (err) => reject(err)
+      )
+    })
 
-  loader.load(
-    MODEL_URL,
-    (gltf) => {
-      modelRoot = gltf.scene
-      modelRoot.traverse(o => {
-        if (o.isMesh) { o.castShadow = true; o.receiveShadow = true }
-      })
-      scene.add(modelRoot)
-      centerCameraOrbit(modelRoot)
-      statusEl.textContent = '✅ Model loaded — upload un sticker'
-      console.log('[GLB OK]', MODEL_URL)
-    },
-    (xhr) => {
-      if (xhr.total) {
-        const pct = Math.round((xhr.loaded / xhr.total) * 100)
-        statusEl.textContent = `Loading model… ${pct}%`
-      }
-    },
-    (err) => {
-      console.error('[GLTF load error]', err)
-      const msg = (err && (err.message || err.toString())) || 'Unknown error'
-      statusEl.textContent = `❌ Model load error: ${msg}`
-    }
-  )
+    statusEl.textContent = '✅ Model loaded — upload un sticker'
+  } catch (err2) {
+    console.error('[GLTF load error after Draco]', err2)
+    const msg = (err2 && (err2.message || err2.toString())) || 'Unknown error'
+    statusEl.textContent = `❌ Model load error: ${msg}`
+  }
+}
+
+function onModelLoaded(gltf) {
+  modelRoot = gltf.scene
+  modelRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
+  scene.add(modelRoot)
+  centerCameraOrbit(modelRoot)
 }
 
 // ---------- Stickers ----------
 function placeOrMoveSticker(point, normal) {
-  if (stickerMesh) {
-    scene.remove(stickerMesh)
-    stickerMesh.geometry?.dispose()
-    stickerMesh.material?.dispose()
-  }
+  if (stickerMesh) { scene.remove(stickerMesh); stickerMesh.geometry?.dispose(); stickerMesh.material?.dispose() }
   const geom = new THREE.PlaneGeometry(1, 1)
   const mat  = new THREE.MeshBasicMaterial({ map: stickerTexture, transparent: true })
   stickerMesh = new THREE.Mesh(geom, mat)
   stickerMesh.position.copy(point)
   stickerMesh.scale.set(stickerScale, stickerScale, 1)
-
   const quatAlign = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal)
-  baseQuat.copy(quatAlign)
-  stickerAxis.copy(normal)
-  applyStickerRotation()
-  scene.add(stickerMesh)
-  statusEl.textContent = 'Sticker placé ✓'
+  baseQuat.copy(quatAlign); stickerAxis.copy(normal); applyStickerRotation()
+  scene.add(stickerMesh); statusEl.textContent = 'Sticker placé ✓'
 }
-
 function applyStickerRotation() {
   if (!stickerMesh) return
   const rotQuat = new THREE.Quaternion().setFromAxisAngle(stickerAxis, stickerRotZ)
@@ -314,8 +268,7 @@ function saveSticker() {
   localStorage.setItem(LS_KEY, JSON.stringify(d))
 }
 function loadSticker(texture) {
-  const raw = localStorage.getItem(LS_KEY)
-  if (!raw || !texture) return
+  const raw = localStorage.getItem(LS_KEY); if (!raw || !texture) return
   try {
     const d = JSON.parse(raw)
     const geom = new THREE.PlaneGeometry(1, 1)
@@ -323,12 +276,10 @@ function loadSticker(texture) {
     stickerMesh = new THREE.Mesh(geom, mat)
     stickerMesh.position.fromArray(d.position)
     stickerMesh.quaternion.fromArray(d.quaternion)
-    stickerScale = d.scale ?? 0.35
-    stickerRotZ  = d.rotZ ?? 0
+    stickerScale = d.scale ?? 0.35; stickerRotZ = d.rotZ ?? 0
     stickerAxis.fromArray(d.axis ?? [0, 0, 1])
     stickerMesh.scale.set(stickerScale, stickerScale, 1)
-    scene.add(stickerMesh)
-    statusEl.textContent = '🧷 Sticker restauré'
+    scene.add(stickerMesh); statusEl.textContent = '🧷 Sticker restauré'
   } catch (e) { console.warn('Load error', e) }
 }
 
