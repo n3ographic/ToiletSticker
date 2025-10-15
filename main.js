@@ -1,4 +1,4 @@
-// Toilet Sticker 3D — Orbit + Meshopt/Draco + Supabase Live
+// Toilet Sticker 3D — Orbit + Meshopt/Draco + Supabase (live + quota 2/j)
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -11,8 +11,9 @@ const MODEL_URL = '/toilet.glb'
 const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
-const BUCKET = 'stickers'   // Storage (Public)
-const TABLE  = 'stickers'   // Table Postgres (avec RLS SELECT/INSERT)
+
+const BUCKET = 'stickers'   // Storage public
+const TABLE  = 'stickers'   // Table Postgres (RLS SELECT/INSERT + quota 2/jour côté SQL)
 const SESSION_ID = crypto.randomUUID()
 
 // ====== UI ======
@@ -37,8 +38,9 @@ let stickerScale = parseFloat(scaleInput.value)
 let stickerRotZ = 0
 let stickerAxis = new THREE.Vector3(0, 0, 1)
 let baseQuat = new THREE.Quaternion()
-const textureCache = new Map()   // url -> THREE.Texture
-const liveStickers = new Map()   // id  -> THREE.Mesh
+
+const textureCache = new Map()  // url -> THREE.Texture
+const liveStickers = new Map()  // id  -> THREE.Mesh
 
 // ---------- Init ----------
 init()
@@ -259,7 +261,7 @@ function removeLocalSticker() {
   statusEl.textContent = 'Sticker local supprimé'
 }
 
-// ---------- Supabase: publish + realtime ----------
+// ---------- Supabase: publish (quota côté SQL = 2/j) + realtime ----------
 async function publishSticker() {
   if (!stickerMesh || !fileInput.files?.[0]) {
     statusEl.textContent = '⚠️ Choisis une image et place-la d’abord'; return
@@ -281,7 +283,7 @@ async function publishSticker() {
     const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path)
     const image_url = pub.publicUrl
 
-    // Ligne dans la table (positions + quat)
+    // Insert DB (RLS vérifie quota 2/jour ici)
     const row = {
       session_id: SESSION_ID,
       image_url,
@@ -296,19 +298,43 @@ async function publishSticker() {
 
     statusEl.textContent = '✅ Publié (visible par tous)'
   } catch (e) {
-    console.error(e); statusEl.textContent = '❌ Publish error'
+    console.error(e)
+    const msg = String(e?.message || e)
+    if (
+      msg.includes('violates row-level security') ||
+      msg.includes('new row violates') ||
+      msg.includes('quota_ok') // selon la version de Postgres, le nom de la fonction peut apparaître
+    ) {
+      statusEl.textContent = '⛔ Tu as déjà publié 2 stickers aujourd’hui.'
+    } else if (msg.includes('StorageApiError') || msg.includes('bucket')) {
+      statusEl.textContent = '⛔ Problème Storage (bucket/policy).'
+    } else {
+      statusEl.textContent = '❌ Erreur lors de la publication.'
+    }
+
+    // petit cooldown côté UI pour éviter le spam du bouton
+    publishBtn.disabled = true
+    let timer = 10
+    const interval = setInterval(() => {
+      publishBtn.textContent = `Réessaie dans ${timer}s`
+      if (--timer <= 0) {
+        clearInterval(interval)
+        publishBtn.textContent = 'Publier'
+        publishBtn.disabled = false
+      }
+    }, 1000)
   }
 }
 
 async function bootstrapLive() {
   try {
-    // 1) charge l’historique
+    // Historique
     const { data, error } = await supabase.from(TABLE)
       .select('*').order('created_at', { ascending: true }).limit(500)
     if (error) throw error
     data?.forEach(addLiveStickerFromRow)
 
-    // 2) écoute en temps réel
+    // Realtime
     supabase
       .channel('stickers-live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLE }, payload => {
@@ -318,7 +344,8 @@ async function bootstrapLive() {
         liveInfo.textContent = status === 'SUBSCRIBED' ? 'Live ON' : 'Live …'
       })
   } catch (e) {
-    console.error('Live bootstrap error', e); liveInfo.textContent = 'Live OFF'
+    console.error('Live bootstrap error', e)
+    liveInfo.textContent = 'Live OFF'
   }
 }
 
