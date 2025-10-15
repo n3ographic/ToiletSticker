@@ -1,4 +1,4 @@
-// 3D + Live stickers (Supabase)
+// Toilet Sticker 3D — Orbit + Meshopt/Draco + Supabase Live
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -8,15 +8,12 @@ import { createClient } from '@supabase/supabase-js'
 
 // ====== CONFIG ======
 const MODEL_URL = '/toilet.glb'
-
-// Vite → ajoute ces 2 variables dans Vercel : VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
+const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
-const BUCKET = 'stickers'       // crée ce bucket public dans Supabase Storage
-const TABLE  = 'stickers'       // crée cette table (SQL plus bas)
-
-const SESSION_ID = crypto.randomUUID() // simple identifiant client
+const BUCKET = 'stickers'
+const TABLE  = 'stickers'
+const SESSION_ID = crypto.randomUUID()
 
 // ====== UI ======
 const container     = document.getElementById('scene')
@@ -41,13 +38,13 @@ let stickerRotZ = 0
 let stickerAxis = new THREE.Vector3(0, 0, 1)
 let baseQuat = new THREE.Quaternion()
 const textureCache = new Map() // url -> THREE.Texture
-const liveStickers = new Map() // id -> mesh
+const liveStickers = new Map() // id  -> THREE.Mesh
 
+// ---------- Init ----------
 init()
 animate()
 bootstrapLive()
 
-// -------------------- Init --------------------
 function init() {
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x111111)
@@ -79,7 +76,6 @@ function init() {
     camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h)
   })
 
-  // UI
   exposureInput.addEventListener('input', () => renderer.toneMappingExposure = parseFloat(exposureInput.value))
   centerBtn.addEventListener('click', () => modelRoot && centerCameraOrbit(modelRoot))
 
@@ -91,7 +87,8 @@ function init() {
     stickerRotZ = (parseFloat(rotInput.value) * Math.PI) / 180
     if (stickerMesh) { applyStickerRotation(); saveSticker() }
   })
-  removeBtn.addEventListener('click', () => { removeLocalSticker() })
+
+  removeBtn.addEventListener('click', removeLocalSticker)
   resetBtn.addEventListener('click', () => {
     scaleInput.value = '0.35'; rotInput.value = '0'; exposureInput.value = '1.2'
     renderer.toneMappingExposure = 1.2; stickerScale = 0.35; stickerRotZ = 0
@@ -101,7 +98,7 @@ function init() {
 
   publishBtn.addEventListener('click', publishSticker)
 
-  // Upload
+  // Upload image
   fileInput.addEventListener('change', (e) => {
     const file = e.target.files?.[0]; if (!file) return
     const url = URL.createObjectURL(file)
@@ -119,7 +116,7 @@ function init() {
     )
   })
 
-  // Click pour placer
+  // Placement par clic
   const ray = new THREE.Raycaster(), mouse = new THREE.Vector2()
   renderer.domElement.addEventListener('click', (ev) => {
     if (!stickerTexture) return
@@ -149,7 +146,7 @@ function init() {
   loadModel()
 }
 
-// -------------------- Modèle (Meshopt + Draco) --------------------
+// ---------- Modèle (Meshopt + Draco) ----------
 function loadModel() {
   statusEl.textContent = 'Chargement du modèle…'
   const loader = new GLTFLoader()
@@ -172,7 +169,7 @@ function loadModel() {
   )
 }
 
-// -------------------- Caméra --------------------
+// ---------- Caméra ----------
 function centerCameraOrbit(root, eyeH = 1.2) {
   const box = new THREE.Box3().setFromObject(root)
   const center = box.getCenter(new THREE.Vector3())
@@ -195,7 +192,7 @@ function findFloorY(root, center, box) {
   return hits.length ? hits[0].point.y : box.min.y
 }
 
-// -------------------- Stickers (local) --------------------
+// ---------- Stickers (local) ----------
 function snappedWallNormal(n) {
   const v = n.clone(); v.y = 0
   if (v.lengthSq() < 1e-6) return new THREE.Vector3(0,0,1)
@@ -263,10 +260,11 @@ function removeLocalSticker() {
   statusEl.textContent = 'Sticker local supprimé'
 }
 
-// -------------------- Supabase: upload + publish + realtime --------------------
+// ---------- Supabase: publish + realtime ----------
 async function publishSticker() {
-  if (!stickerMesh || !fileInput.files?.[0]) { statusEl.textContent = '⚠️ Choisis d’abord une image et place-la'; return }
-
+  if (!stickerMesh || !fileInput.files?.[0]) {
+    statusEl.textContent = '⚠️ Choisis une image et place-la d’abord'; return
+  }
   try {
     statusEl.textContent = '⬆️ Upload du sticker…'
     const file = fileInput.files[0]
@@ -274,15 +272,14 @@ async function publishSticker() {
     const filename = `${SESSION_ID}-${Date.now()}.${ext}`
     const path = `users/${SESSION_ID}/${filename}`
 
-    // Upload vers Storage
-    const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: file.type })
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
+      upsert: true, contentType: file.type
+    })
     if (upErr) throw upErr
 
-    // URL publique
     const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path)
     const image_url = pub.publicUrl
 
-    // Données de placement
     const row = {
       session_id: SESSION_ID,
       image_url,
@@ -292,49 +289,37 @@ async function publishSticker() {
       axis: stickerAxis.toArray(),
       rotz: stickerRotZ
     }
-
     const { error: insErr } = await supabase.from(TABLE).insert(row)
     if (insErr) throw insErr
 
-    statusEl.textContent = '✅ Publié ! (visible par tous)'
+    statusEl.textContent = '✅ Publié (visible par tous)'
   } catch (e) {
-    console.error(e)
-    statusEl.textContent = '❌ Publish error'
+    console.error(e); statusEl.textContent = '❌ Publish error'
   }
 }
 
 async function bootstrapLive() {
   try {
-    // 1) Charge tous les stickers existants
-    const { data, error } = await supabase
-      .from(TABLE)
-      .select('*')
-      .order('created_at', { ascending: true })
-      .limit(500)
-
+    const { data, error } = await supabase.from(TABLE)
+      .select('*').order('created_at', { ascending: true }).limit(500)
     if (error) throw error
     data?.forEach(addLiveStickerFromRow)
 
-    // 2) Listen realtime (INSERT)
     supabase
       .channel('stickers-live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLE }, payload => {
         addLiveStickerFromRow(payload.new)
       })
       .subscribe((status) => {
-        liveInfo.textContent = status === 'SUBSCRIBED' ? 'Live ON' : 'Live…'
+        liveInfo.textContent = status === 'SUBSCRIBED' ? 'Live ON' : 'Live …'
       })
-
   } catch (e) {
-    console.error('Live bootstrap error', e)
-    liveInfo.textContent = 'Live OFF'
+    console.error('Live bootstrap error', e); liveInfo.textContent = 'Live OFF'
   }
 }
 
 function addLiveStickerFromRow(row) {
-  // évite de dupliquer si déjà présent
   if (liveStickers.has(row.id)) return
-
   loadTextureCached(row.image_url, (tex) => {
     const geom = new THREE.PlaneGeometry(1,1)
     const mat  = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
@@ -357,5 +342,5 @@ function loadTextureCached(url, onReady){
   )
 }
 
-// -------------------- Loop --------------------
+// ---------- Loop ----------
 function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera) }
