@@ -1,5 +1,4 @@
-// main.js — ToiletSticker (version IP-quota + admin modal + purge + clear mine)
-// ATTENTION: pour production, move admin actions to a server (this client-side admin check is only for quick prototyping).
+// main.js — admin footer bar + hotkey, IP-quota, Orbit360, ratio respect, live + clear mine/all
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -12,12 +11,12 @@ import { createClient } from '@supabase/supabase-js'
 const MODEL_URL = '/toilet.glb'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '' // pour prototype
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '' // client-only prototype
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
 const BUCKET = 'stickers'
 const TABLE  = 'stickers'
 
-// ---------- SESSION persistée ----------
+// ---------- SESSION ----------
 function getOrCreateSessionId() {
   const KEY = 'TOILET_SESSION_ID'
   let id = localStorage.getItem(KEY)
@@ -36,11 +35,15 @@ const removeBtn  = document.getElementById('removeBtn')
 const publishBtn = document.getElementById('publishBtn')
 const clearMineBtn = document.getElementById('clearMine')
 
-// admin modal
-const adminModal = document.getElementById('adminModal')
+// admin footer bar
+const adminBar = document.getElementById('adminBar')
+const adminTitle = document.getElementById('adminTitle')
 const adminPassInput = document.getElementById('adminPassword')
-const adminSubmit = document.getElementById('adminSubmit')
-const adminCancel = document.getElementById('adminCancel')
+const adminEnterBtn = document.getElementById('adminEnter')
+const adminLockedRow = document.getElementById('adminLocked')
+const adminUnlockedRow = document.getElementById('adminUnlocked')
+const adminCloseBtn = document.getElementById('adminClose')
+const adminCleanAllBtn = document.getElementById('adminCleanAll')
 
 // ---------- Three.js ----------
 let scene, camera, renderer, controls, modelRoot
@@ -53,23 +56,15 @@ const LS_KEY = 'toilet-sticker-save'
 const liveStickers = new Map()
 const textureCache = new Map()
 
-// client ip cache (promise)
-let CLIENT_IP = null
-let fetchIpPromise = null
+// ---------- IP fetch ----------
+let CLIENT_IP = null, fetchIpPromise = null
 function fetchClientIp() {
   if (CLIENT_IP) return Promise.resolve(CLIENT_IP)
   if (fetchIpPromise) return fetchIpPromise
   fetchIpPromise = fetch('https://api.ipify.org?format=json').then(r=>{
     if(!r.ok) throw new Error('ip fetch failed')
     return r.json()
-  }).then(j => {
-    CLIENT_IP = j.ip || null
-    return CLIENT_IP
-  }).catch(e=>{
-    console.warn('Could not fetch IP:', e)
-    CLIENT_IP = null
-    return null
-  })
+  }).then(j => (CLIENT_IP = j.ip || null)).catch(()=> (CLIENT_IP = null))
   return fetchIpPromise
 }
 
@@ -77,10 +72,8 @@ function fetchClientIp() {
 init()
 animate()
 bootstrapLive().then(updatePublishLabel).catch(console.warn)
-fetchClientIp().then(ip=>console.log('client ip', ip))
+fetchClientIp()
 
-// ===========================================================
-// INIT
 // ===========================================================
 function init() {
   scene = new THREE.Scene()
@@ -114,8 +107,8 @@ function init() {
   controls.maxAzimuthAngle = Infinity
 
   addUIEvents()
-  installSimpleClickGuard()   // reliable click guard
-  installAdminHotkey()        // secret sequence listener
+  installSimpleClickGuard()
+  installAdminHotkey()
 
   loadModel()
 
@@ -126,8 +119,6 @@ function init() {
   })
 }
 
-// ===========================================================
-// MODEL
 // ===========================================================
 function loadModel(){
   status('Loading 3D…')
@@ -169,8 +160,6 @@ function findFloorY(root, c, box){
 }
 
 // ===========================================================
-// UI
-// ===========================================================
 function addUIEvents(){
   fileInput.addEventListener('change', (e)=>{
     const f = e.target.files?.[0]; if (!f) return
@@ -198,22 +187,21 @@ function addUIEvents(){
   publishBtn.addEventListener('click', publishSticker)
   clearMineBtn.addEventListener('click', deleteMyStickers)
 
-  // admin modal events
-  adminCancel.addEventListener('click', closeAdminModal)
-  adminSubmit.addEventListener('click', () => {
+  // admin bar events
+  adminEnterBtn.addEventListener('click', () => {
     const v = adminPassInput.value || ''
     if (v === ADMIN_PASSWORD && ADMIN_PASSWORD !== '') {
-      closeAdminModal()
-      openAdminConsole()
+      unlockAdminBar()
     } else {
-      alert('Wrong admin password (client-side check).')
+      alert('Wrong password')
     }
   })
+  adminCloseBtn.addEventListener('click', () => lockAdminBar(true))
+  adminCleanAllBtn.addEventListener('click', deleteAllStickers)
 }
 
 // ===========================================================
-// CLICK GUARD (simple & reliable)
-// ===========================================================
+// CLICK GUARD
 function installSimpleClickGuard(){
   let downX=0, downY=0, downT=0, moved=false, isOrbiting=false
   const px = Math.max(6, 6 * (window.devicePixelRatio || 1))
@@ -243,7 +231,7 @@ function installSimpleClickGuard(){
 }
 
 // ===========================================================
-// PLACE LOGIC (respects image ratio + orientation)
+// PLACE LOGIC
 function tryPlaceStickerFromPointer(ev){
   if (!stickerTexture || !modelRoot) return
   const rect=renderer.domElement.getBoundingClientRect()
@@ -359,15 +347,14 @@ function removeLocalSticker(){
 }
 
 // ===========================================================
-// SUPABASE: publish with client_ip included
-// ===========================================================
+// SUPABASE publish (includes client_ip)
 async function publishSticker(){
   if(!stickerMesh || !fileInput.files?.[0]) return status('⚠️ Pick a file and place it first')
   try{
     lockPublish(false)
     status('Uploading…')
 
-    const ip = await fetchClientIp() // may be null
+    const ip = await fetchClientIp()
     const file = fileInput.files[0]
     const ext = (file.name.split('.').pop()||'png').toLowerCase()
     const path = `users/${SESSION_ID}/${Date.now()}.${ext}`
@@ -407,8 +394,7 @@ async function publishSticker(){
 }
 
 // ===========================================================
-// LIVE bootstrap
-// ===========================================================
+// LIVE
 async function bootstrapLive(){
   const { data, error } = await supabase.from(TABLE).select('*').order('created_at',{ascending:true}).limit(500)
   if (!error) data?.forEach(addLiveFromRow)
@@ -425,8 +411,7 @@ async function bootstrapLive(){
 function addLiveFromRow(row){
   if (!row?.id || liveStickers.has(row.id)) return
   loadTex(row.image_url, (tex) => {
-    // If row was saved before ratio-support, the image may be square; we don't know ratio stored.
-    const g = new THREE.PlaneGeometry(1,1)
+    const g = new THREE.PlaneGeometry(1,1) // anciens items = carré
     const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     const mesh = new THREE.Mesh(g,m)
     mesh.position.fromArray(row.position)
@@ -438,43 +423,25 @@ function addLiveFromRow(row){
 }
 
 // ===========================================================
-// DELETE / PURGE helpers
-// ===========================================================
+// DELETE / PURGE
 async function deleteMyStickers(){
-  if (!confirm('Delete all stickers posted by your session? This cannot be undone for those items.')) return
+  if (!confirm('Delete all stickers posted by your session?')) return
   try {
-    // 1) get rows to delete (to know storage path)
     const { data, error } = await supabase.from(TABLE).select('id, image_url').eq('session_id', SESSION_ID)
     if (error) throw error
 
-    // 2) delete DB rows
     const { error:delErr } = await supabase.from(TABLE).delete().eq('session_id', SESSION_ID)
     if (delErr) throw delErr
 
-    // 3) attempt to delete storage objects referenced
+    // tentative de nettoyage Storage
     if (Array.isArray(data)) {
-      for (const r of data) {
-        // infer path from url - naive approach: publicUrl contains /object/.. or /storage/v1/object/public/...
-        try {
-          const url = new URL(r.image_url)
-          const pathname = url.pathname
-          // try to extract last part after '/' — if files saved under users/..., we can remove via that key
-          const parts = pathname.split('/')
-          const filename = parts.slice(-1)[0]
-          // list and remove any object matching filename under users/<session>
-          // We try a safe approach: list all objects under users/<SESSION_ID> and remove those with filename
-          const listing = await supabase.storage.from(BUCKET).list(`users/${SESSION_ID}`, { limit: 1000 })
-          if (listing.error) continue
-          for (const item of listing.data || []) {
-            if (item.name === filename) {
-              await supabase.storage.from(BUCKET).remove([`users/${SESSION_ID}/${item.name}`]).catch(()=>{})
-            }
-          }
-        } catch(e){}
+      const listing = await supabase.storage.from(BUCKET).list(`users/${SESSION_ID}`, { limit: 1000 })
+      if (!listing.error) {
+        const keys = (listing.data || []).map(it => `users/${SESSION_ID}/${it.name}`)
+        if (keys.length) await supabase.storage.from(BUCKET).remove(keys)
       }
     }
 
-    // UI cleanup
     liveStickers.forEach(mesh => scene.remove(mesh))
     liveStickers.clear()
     status('🗑️ Your stickers deleted')
@@ -485,38 +452,20 @@ async function deleteMyStickers(){
   }
 }
 
-// Admin: open modal by secret hotkey; if unlocked -> delete all rows & storage
 async function deleteAllStickers() {
-  if (!confirm('Delete ALL stickers for everyone? This is irreversible.')) return
+  if (!confirm('Delete ALL stickers for everyone?')) return
   try {
-    // 1) fetch all rows to find storage paths
-    const { data, error } = await supabase.from(TABLE).select('id, image_url')
-    if (error) throw error
-
-    // 2) delete DB rows
     const { error:delErr } = await supabase.from(TABLE).delete().neq('id', 0)
     if (delErr) throw delErr
 
-    // 3) try to clear bucket files (list root and remove)
-    // Warning: this will attempt to list and delete many files; adapt if you have more than the API limits.
-    const toDelete = []
-    let offset = 0; const limit = 1000
-    while (true) {
-      const listRes = await supabase.storage.from(BUCKET).list('', { limit, offset })
-      if (listRes.error) break
-      const items = listRes.data || []
-      if (!items.length) break
-      for (const it of items) {
-        // remove file path relative to bucket
-        toDelete.push(it.name)
+    // clear bucket root (shallow)
+    const list = await supabase.storage.from(BUCKET).list('', { limit: 1000 })
+    if (!list.error) {
+      const files = (list.data || []).map(it => it.name)
+      while (files.length) {
+        const chunk = files.splice(0, 100)
+        await supabase.storage.from(BUCKET).remove(chunk).catch(()=>{})
       }
-      if (items.length < limit) break
-      offset += items.length
-    }
-    // remove by chunks
-    while (toDelete.length) {
-      const chunk = toDelete.splice(0, 100)
-      await supabase.storage.from(BUCKET).remove(chunk).catch(()=>{})
     }
 
     liveStickers.forEach(mesh => scene.remove(mesh))
@@ -529,40 +478,58 @@ async function deleteAllStickers() {
 }
 
 // ===========================================================
-// Admin modal & hotkey
-// ===========================================================
-function installAdminHotkey() {
-  const seq = 'opensesame'
-  let buf = ''
-  window.addEventListener('keydown', (e) => {
-    if (e.key && e.key.length === 1) {
-      buf += e.key.toLowerCase()
-      if (!seq.startsWith(buf)) buf = buf.slice(-seq.length)
-      if (buf.endsWith(seq)) {
-        openAdminModal()
-        buf = ''
-      }
+// ADMIN BAR (secret hotkey + states)
+let adminOpen = false
+let adminUnlocked = false
+
+function installAdminHotkey(){
+  window.addEventListener('keydown', (e)=>{
+    // touche secrète : Shift + A
+    if (e.key.toLowerCase() === 'a' && e.shiftKey) {
+      toggleAdminBar()
     }
   })
 }
 
-function openAdminModal(){
-  adminModal.setAttribute('aria-hidden', 'false')
+function toggleAdminBar(){
+  adminOpen = !adminOpen
+  adminBar.setAttribute('aria-hidden', adminOpen ? 'false' : 'true')
+  if (adminOpen) {
+    if (adminUnlocked) showAdminUnlocked()
+    else showAdminLocked()
+  }
+}
+
+function lockAdminBar(hide=false){
+  adminUnlocked = false
+  adminTitle.textContent = 'Admin'
+  adminLockedRow.hidden = false
+  adminUnlockedRow.hidden = true
+  if (hide) {
+    adminOpen = false
+    adminBar.setAttribute('aria-hidden', 'true')
+  }
+}
+
+function unlockAdminBar(){
+  adminUnlocked = true
+  showAdminUnlocked()
+}
+
+function showAdminLocked(){
+  adminTitle.textContent = 'Admin'
+  adminLockedRow.hidden = false
+  adminUnlockedRow.hidden = true
   adminPassInput.value = ''
   adminPassInput.focus()
 }
-function closeAdminModal(){
-  adminModal.setAttribute('aria-hidden', 'true')
+
+function showAdminUnlocked(){
+  adminTitle.textContent = 'Admin connected'
+  adminLockedRow.hidden = true
+  adminUnlockedRow.hidden = false
 }
 
-function openAdminConsole(){
-  // reveal admin actions in UI — simple approach: confirm and run purge
-  if (!confirm('Admin unlocked — purge entire DB now?')) return
-  deleteAllStickers()
-}
-
-// ===========================================================
-// HELPERS: textures, status, counters
 // ===========================================================
 function loadTex(url, cb){
   if (textureCache.has(url)) return cb(textureCache.get(url))
