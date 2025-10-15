@@ -1,5 +1,6 @@
 {
-  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview" },
-  "dependencies": { "three": "0.180.0" },
-  "devDependencies": { "vite": "^6.3.5" }
+  "rewrites": [
+    { "source": "/:all*(glb|gltf|bin|png|jpg|jpeg|webp)", "destination": "/:all" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
 }
