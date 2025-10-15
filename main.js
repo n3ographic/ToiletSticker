@@ -226,7 +226,7 @@ function tryPlaceStickerFromPointer(ev){
     n.transformDirection(hit.object.matrixWorld).normalize()
   }
   // murs only
-  if(Math.abs(n.y)>0.6){ status('⛔ Place sur un mur'); return }
+  if(Math.abs(n.y)>0.6){ status('⛔ Place on a wall'); return }
 
   n = snappedWallNormal(n)
 
@@ -358,7 +358,7 @@ async function publishSticker(){
     }
     const { error:insErr }=await supabase.from(TABLE).insert(row)
     if(insErr) throw insErr
-    status('✅ Published')
+    status('Published')
     await updatePublishLabel()
   }catch(e){
     console.error(e)
