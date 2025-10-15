@@ -1,9 +1,11 @@
 // main.js — Toilet Sticker (Three.js + Supabase)
-// - Orbit 360° fixe (sans pan/zoom), click guard, ratio image respecté
-// - Publish 2/24h (RLS côté Supabase), compteur affiché
-// - Live fetch + realtime
-// - Clear mine, Clean all (purge récursive du bucket)
-// - Admin footer bar (Shift + A)
+// - Orbit 360° fixe (pas de pan/zoom)
+// - Click guard (clic court, sans drag) pour coller le sticker
+// - Ratio image respecté (pas forcé en carré)
+// - Publish limité par RLS (2 / 24h), compteur affiché
+// - Realtime + fetch initial
+// - Clear mine + Clean all (DELETE all + purge Storage récursive)
+// - Admin bar (Shift + A)
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -16,7 +18,7 @@ import { createClient } from '@supabase/supabase-js'
 const MODEL_URL = '/toilet.glb'
 const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '' // client-side prototype
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '' // client-side (prototype)
 const BUCKET = 'stickers'
 const TABLE  = 'stickers'
 
@@ -62,7 +64,7 @@ const LS_KEY = 'toilet-sticker-save'
 const liveStickers = new Map()
 const textureCache = new Map()
 
-// IP (pour message côté client ; la policy RLS peut fallback sur header x-forwarded-for)
+// IP (pour message côté client)
 let CLIENT_IP = null, fetchIpPromise = null
 function fetchClientIp(){
   if (CLIENT_IP) return Promise.resolve(CLIENT_IP)
@@ -417,7 +419,7 @@ async function bootstrapLive(){
 function addLiveFromRow(row){
   if (!row?.id || liveStickers.has(row.id)) return
   loadTex(row.image_url, (tex)=>{
-    const g = new THREE.PlaneGeometry(1,1) // legacy (carré) ; les nouveaux gardent ratio local
+    const g = new THREE.PlaneGeometry(1,1) // legacy (anciens collages carrés)
     const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     const mesh = new THREE.Mesh(g,m)
     mesh.position.fromArray(row.position)
@@ -434,17 +436,18 @@ function addLiveFromRow(row){
 async function deleteMyStickers(){
   if (!confirm('Delete all stickers posted by your session?')) return
   try {
-    const { data, error } = await supabase.from(TABLE).select('id').eq('session_id', SESSION_ID)
-    if (error) throw error
-
+    // DB
     const del = await supabase.from(TABLE).delete().eq('session_id', SESSION_ID)
     if (del.error) throw del.error
 
-    // Tentative de nettoyage Storage (dossier de la session)
+    // Storage (dossier de la session)
     const listing = await supabase.storage.from(BUCKET).list(`users/${SESSION_ID}`, { limit: 1000 })
     if (!listing.error) {
       const keys = (listing.data || []).map(it => `users/${SESSION_ID}/${it.name}`)
-      if (keys.length) await supabase.storage.from(BUCKET).remove(keys)
+      if (keys.length) {
+        const rem = await supabase.storage.from(BUCKET).remove(keys)
+        if (rem.error) throw rem.error
+      }
     }
 
     liveStickers.forEach(mesh => scene.remove(mesh))
@@ -457,13 +460,13 @@ async function deleteMyStickers(){
   }
 }
 
-// >>> Clean all avec purge récursive du bucket <<<
+// >>> Clean all avec fix UUID: not('id','is',null) + purge récursive Storage <<<
 async function deleteAllStickers() {
   if (!confirm('Delete ALL stickers for everyone?')) return
   try {
-    // 1) Delete DB rows (RLS doit autoriser le DELETE)
-    const del = await supabase.from(TABLE).delete().neq('id', 0)
-    if (del.error) throw del.error
+    // 1) Delete toutes les lignes (marche pour UUID ou INT)
+    const del = await supabase.from(TABLE).delete().not('id', 'is', null)
+    if (del.error) { console.error('DB delete error:', del.error); throw del.error }
 
     // 2) Récupérer toutes les clés storage (récursif)
     const keys = await listAllStorageKeysRecursive('') // racine
@@ -472,7 +475,7 @@ async function deleteAllStickers() {
     while (keys.length) {
       const chunk = keys.splice(0, 100)
       const rem = await supabase.storage.from(BUCKET).remove(chunk)
-      if (rem.error) throw rem.error
+      if (rem.error) { console.error('Storage remove error:', rem.error); throw rem.error }
     }
 
     // 4) Nettoyage scène
