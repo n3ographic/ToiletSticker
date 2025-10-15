@@ -2,7 +2,7 @@
 // - Orbit 360° (pas de pan/zoom)
 // - Collage au click simple : ignore si un drag a eu lieu entre pointerdown et click
 // - Ratio image respecté (plane selon ratio de l’image)
-// - Publish limité (2/24h via RLS), compteur affiché
+// - Publish limité (2/24h via RLS), bouton devient "Blocked"
 // - Realtime + fetch initial
 // - Admin bar (Shift + A) avec Clean all (DELETE all + purge Storage récursive)
 
@@ -368,10 +368,8 @@ async function publishSticker(){
       image_url,
       position:   stickerMesh.position.toArray(),
       quaternion: stickerMesh.quaternion.toArray(),
-      base_quat:  baseQuat.toArray(),
       scale:      stickerScale,
-      axis: [0,0,1],
-      rotz: stickerRotZ
+      rotz:       stickerRotZ
     }
 
     const ins = await supabase.from(TABLE).insert(row)
@@ -517,6 +515,7 @@ function loadTex(url, cb){
 }
 function status(txt){ if(statusEl) statusEl.textContent = txt }
 
+// Compte le nombre de stickers publiés par cette session sur 24h glissantes
 async function getTodayCount(){
   const since = new Date(Date.now() - 24*60*60*1000).toISOString()
   const res = await supabase.from(TABLE)
@@ -525,15 +524,35 @@ async function getTodayCount(){
     .eq('session_id', SESSION_ID)
   return res?.count ?? 0
 }
-async function updatePublishLabel(){
-  try{
+
+// Met à jour le label + état du bouton Publish
+async function updatePublishLabel() {
+  try {
     const c = await getTodayCount()
-    if (publishBtn) publishBtn.textContent = `Publish ${Math.min(c,2)}/2`
-  }catch{}
+    if (!publishBtn) return
+
+    if (c >= 2) {
+      publishBtn.textContent = 'Blocked'
+      publishBtn.disabled = true
+      publishBtn.style.opacity = 0.5
+      publishBtn.style.cursor = 'not-allowed'
+    } else {
+      publishBtn.textContent = `Publish ${c}/2`
+      publishBtn.disabled = false
+      publishBtn.style.opacity = 1
+      publishBtn.style.cursor = 'pointer'
+    }
+  } catch (e) {
+    console.warn('updatePublishLabel error', e)
+  }
 }
+
 function lockPublish(enabled){ if (publishBtn) publishBtn.disabled = !enabled }
+
+// Petit cooldown lorsqu’un publish échoue (réseau, etc.)
 function cooldownPublish(){
   if (!publishBtn) return
+  if (publishBtn.textContent === 'Blocked') return
   publishBtn.disabled = true
   let t=10
   const iv=setInterval(()=>{
