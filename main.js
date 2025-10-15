@@ -243,10 +243,10 @@ async function loadModel() {
   // GLTF + DRACO
   const loader = new GLTFLoader()
   const draco = new DRACOLoader()
-  draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/')
+
   // Si souci réseau/WASM, décommente la ligne suivante :
   // draco.setDecoderConfig({ type: 'js' })
-  loader.setDRACOLoader(draco)
+
 
   loader.load(
     MODEL_URL,
