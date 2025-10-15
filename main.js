@@ -1,4 +1,4 @@
-// main.js — ToiletSticker (360 Orbit + robust click + orientation fix + Supabase)
+// main.js — ToiletSticker (360 Orbit + simple click guard + image ratio + Supabase)
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -81,7 +81,7 @@ function init() {
   controls.enableDamping = true
   controls.dampingFactor = 0.08
 
-  // 360° complet
+  // 360° complet vertical + horizontal (distance fixe)
   const EPS = 1e-3
   controls.minPolarAngle = EPS
   controls.maxPolarAngle = Math.PI - EPS
@@ -89,7 +89,7 @@ function init() {
   controls.maxAzimuthAngle =  Infinity
 
   addUIEvents()
-  installRobustClick()
+  installSimpleClickGuard()   // ⬅️ la version simple et fiable
   loadModel()
 
   window.addEventListener('resize', () => {
@@ -129,10 +129,8 @@ function centerOrbit(root, eyeH=1.2){
   controls.target.set(c.x, floor + eyeH, c.z)
   camera.position.set(c.x, floor + eyeH + 0.4, c.z + r)
 
-  // distance fixe
-  controls.minDistance = r * 0.9
+  controls.minDistance = r * 0.9 // distance verrouillée
   controls.maxDistance = r * 0.9
-
   controls.update()
 }
 
@@ -144,7 +142,7 @@ function findFloorY(root, c, box){
 }
 
 // ===========================================================
-// UI EVENTS
+// UI
 // ===========================================================
 function addUIEvents(){
   fileInput.addEventListener('change', (e)=>{
@@ -174,50 +172,35 @@ function addUIEvents(){
 }
 
 // ===========================================================
-// ROBUST CLICK (no place during orbit drag)
+// SIMPLE CLICK GUARD (celui qui marche bien avec Orbit)
 // ===========================================================
-function installRobustClick(){
-  // Variables d'état
+function installSimpleClickGuard(){
   let downX=0, downY=0, downT=0, moved=false, isOrbiting=false
-  let downTarget = null
-  let lastOrbitEnd = 0
-
-  const px = Math.max(6, 6 * (window.devicePixelRatio || 1)) // seuil distance en px
+  const px = Math.max(6, 6 * (window.devicePixelRatio || 1)) // seuil distance
   const px2 = px * px
-  const maxDuration = 500 // ms
+  const maxDuration = 300 // ms
 
   controls.addEventListener('start', ()=>{ isOrbiting = true })
-  controls.addEventListener('end',   ()=>{ isOrbiting = false; lastOrbitEnd = performance.now() })
+  controls.addEventListener('end',   ()=>{ isOrbiting = false })
 
-  renderer.domElement.addEventListener('pointerdown', (e)=>{
-    if (e.button !== 0) return // gauche uniquement
-    downTarget = e.target
+  renderer.domElement.addEventListener('pointerdown', e=>{
+    if (e.button !== 0) return // clic gauche
     downX=e.clientX; downY=e.clientY; downT=performance.now(); moved=false
-  }, { passive: true })
-
-  renderer.domElement.addEventListener('pointermove', (e)=>{
+  })
+  renderer.domElement.addEventListener('pointermove', e=>{
     if (moved) return
     const dx=e.clientX-downX, dy=e.clientY-downY
-    if (dx*dx+dy*dy > px2) moved=true
-  }, { passive: true })
-
-  renderer.domElement.addEventListener('pointerup', (e)=>{
-    const dt=performance.now()-downT
-    const dx=e.clientX-downX, dy=e.clientY-downY
-    const dist2=dx*dx+dy*dy
-    const sinceOrbit = performance.now() - lastOrbitEnd
-
-    // Garde-fous : canvas visé, pas orbit, pas bougé, pas long press, cible identique, petite latence post-orbit
+    if (dx*dx+dy*dy > px2) moved = true
+  })
+  renderer.domElement.addEventListener('pointerup', e=>{
     if (e.button !== 0) return
-    if (downTarget !== renderer.domElement) return
-    if (isOrbiting || moved || dist2>px2 || dt>maxDuration || sinceOrbit < 80) return
-
-    // OK: vrai clic → tentative de placement
+    const dt = performance.now() - downT
+    const dx = e.clientX - downX, dy = e.clientY - downY
+    const dist2 = dx*dx + dy*dy
+    if (isOrbiting || moved || dist2 > px2 || dt > maxDuration) return
+    // vrai "clic" → on tente de poser
     tryPlaceStickerFromPointer(e)
-  }, { passive: true })
-
-  // éviter le menu contextuel parasite
-  renderer.domElement.addEventListener('contextmenu', (e)=> e.preventDefault())
+  })
 }
 
 function tryPlaceStickerFromPointer(ev){
@@ -230,19 +213,23 @@ function tryPlaceStickerFromPointer(ev){
   const ray=new THREE.Raycaster()
   ray.setFromCamera(mouse,camera)
 
-  // IMPORTANT: on intersecte SEULEMENT le modèle (évite de cliquer sur le sticker lui-même)
+  // On intersecte uniquement le modèle (pas le sticker déjà placé)
   const hits=ray.intersectObjects([modelRoot], true)
   if(!hits.length)return
   const hit=hits[0]
 
+  // normale monde
   let n=new THREE.Vector3(0,0,1)
   if(hit.face?.normal){
     n.copy(hit.face.normal)
     hit.object.updateMatrixWorld()
     n.transformDirection(hit.object.matrixWorld).normalize()
   }
-  if(Math.abs(n.y)>0.6){status('⛔ Place sur un mur');return}
-  n=snappedWallNormal(n)
+  // murs only
+  if(Math.abs(n.y)>0.6){ status('⛔ Place sur un mur'); return }
+
+  n = snappedWallNormal(n)
+
   const EPS=0.006
   const p=hit.point.clone().add(n.clone().multiplyScalar(EPS))
   placeOrMoveSticker(p,n)
@@ -250,7 +237,7 @@ function tryPlaceStickerFromPointer(ev){
 }
 
 // ===========================================================
-// STICKERS (orientation locale stable)
+// STICKERS (respect du ratio + orientation locale stable)
 // ===========================================================
 function snappedWallNormal(n){
   const v=n.clone(); v.y=0
@@ -270,18 +257,25 @@ function makeStickerQuaternion(normal){
   return new THREE.Quaternion().setFromRotationMatrix(m)
 }
 
+function createStickerMeshFromTexture(tex){
+  // Respecte le ratio de l'image
+  const img = tex.image
+  const ratio = img ? (img.width / img.height) : 1
+  const geom = new THREE.PlaneGeometry(1 * ratio, 1) // largeur = ratio, hauteur = 1
+  const mat  = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+  return new THREE.Mesh(geom, mat)
+}
+
 function placeOrMoveSticker(point, normal){
   if(stickerMesh){
     scene.remove(stickerMesh)
     stickerMesh.geometry?.dispose()
     stickerMesh.material?.dispose()
   }
-  const geom=new THREE.PlaneGeometry(1,1)
-  const mat =new THREE.MeshBasicMaterial({ map:stickerTexture, transparent:true })
-  stickerMesh=new THREE.Mesh(geom,mat)
+  stickerMesh = createStickerMeshFromTexture(stickerTexture)
   stickerMesh.position.copy(point)
-  stickerMesh.scale.set(stickerScale,stickerScale,1)
-  baseQuat=makeStickerQuaternion(normal)
+  stickerMesh.scale.set(stickerScale, stickerScale, 1)
+  baseQuat = makeStickerQuaternion(normal)
   stickerMesh.quaternion.copy(baseQuat)
   applyStickerRotation()
   scene.add(stickerMesh)
@@ -289,40 +283,41 @@ function placeOrMoveSticker(point, normal){
 }
 
 function applyStickerRotation(){
-  if(!stickerMesh)return
+  if(!stickerMesh) return
   stickerMesh.quaternion.copy(baseQuat)
-  stickerMesh.rotateOnAxis(new THREE.Vector3(0,0,1),stickerRotZ)
+  stickerMesh.rotateOnAxis(new THREE.Vector3(0,0,1), stickerRotZ)
 }
 
 function saveSticker(){
-  if(!stickerMesh)return
-  const d={
-    position:stickerMesh.position.toArray(),
-    quaternion:stickerMesh.quaternion.toArray(),
-    baseQuat:baseQuat.toArray(),
-    scale:stickerScale,
-    rotZ:stickerRotZ
+  if(!stickerMesh) return
+  const d = {
+    position: stickerMesh.position.toArray(),
+    quaternion: stickerMesh.quaternion.toArray(),
+    baseQuat: baseQuat.toArray(),
+    scale: stickerScale,
+    rotZ: stickerRotZ
   }
-  localStorage.setItem(LS_KEY,JSON.stringify(d))
+  localStorage.setItem(LS_KEY, JSON.stringify(d))
 }
 
 function loadSticker(texture){
-  const raw=localStorage.getItem(LS_KEY); if(!raw||!texture)return
+  const raw = localStorage.getItem(LS_KEY); if(!raw || !texture) return
   try{
-    const d=JSON.parse(raw)
-    const geom=new THREE.PlaneGeometry(1,1)
-    const mat =new THREE.MeshBasicMaterial({ map:texture, transparent:true })
-    stickerMesh=new THREE.Mesh(geom,mat)
+    const d = JSON.parse(raw)
+    stickerMesh = createStickerMeshFromTexture(texture)
     stickerMesh.position.fromArray(d.position)
-    stickerScale=d.scale??0.35; sizeRange.value=String(stickerScale)
-    stickerRotZ =d.rotZ ??0;    rotRange.value =String((stickerRotZ*180)/Math.PI)
-    stickerMesh.scale.set(stickerScale,stickerScale,1)
+    stickerScale = d.scale ?? 0.35; sizeRange.value = String(stickerScale)
+    stickerRotZ  = d.rotZ  ?? 0;    rotRange.value  = String((stickerRotZ*180)/Math.PI)
+    stickerMesh.scale.set(stickerScale, stickerScale, 1)
+
     if(d.baseQuat){ baseQuat.fromArray(d.baseQuat); applyStickerRotation() }
-    else{ const qF=new THREE.Quaternion().fromArray(d.quaternion)
-          const qR=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stickerRotZ)
-          baseQuat.copy(qF).multiply(qR.invert()); applyStickerRotation() }
+    else{
+      const qF=new THREE.Quaternion().fromArray(d.quaternion)
+      const qR=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stickerRotZ)
+      baseQuat.copy(qF).multiply(qR.invert()); applyStickerRotation()
+    }
     scene.add(stickerMesh)
-  }catch(e){console.warn('Load sticker error',e)}
+  }catch(e){ console.warn('Load sticker error', e) }
 }
 
 function removeLocalSticker(){
@@ -340,7 +335,7 @@ function removeLocalSticker(){
 // SUPABASE (Storage + INSERT RLS quota 2/j + live)
 // ===========================================================
 async function publishSticker(){
-  if(!stickerMesh||!fileInput.files?.[0])return status('⚠️ Pick a file and place it first')
+  if(!stickerMesh || !fileInput.files?.[0]) return status('⚠️ Pick a file and place it first')
   try{
     lockPublish(false)
     status('Uploading…')
@@ -348,7 +343,7 @@ async function publishSticker(){
     const ext=(file.name.split('.').pop()||'png').toLowerCase()
     const path=`users/${SESSION_ID}/${Date.now()}.${ext}`
     const { error:upErr }=await supabase.storage.from(BUCKET).upload(path,file,{ upsert:true, contentType:file.type })
-    if(upErr)throw upErr
+    if(upErr) throw upErr
     const { data:pub }=supabase.storage.from(BUCKET).getPublicUrl(path)
     const image_url=pub.publicUrl
     const row={
@@ -362,7 +357,7 @@ async function publishSticker(){
       rotz:stickerRotZ
     }
     const { error:insErr }=await supabase.from(TABLE).insert(row)
-    if(insErr)throw insErr
+    if(insErr) throw insErr
     status('✅ Published')
     await updatePublishLabel()
   }catch(e){
@@ -379,20 +374,20 @@ async function publishSticker(){
 async function bootstrapLive(){
   const { data, error }=await supabase.from(TABLE)
     .select('*').order('created_at',{ascending:true}).limit(500)
-  if(!error)data?.forEach(addLiveFromRow)
+  if(!error) data?.forEach(addLiveFromRow)
   supabase
     .channel('stickers-live')
     .on('postgres_changes',{ event:'INSERT', schema:'public', table:TABLE },payload=>{
       addLiveFromRow(payload.new)
-      if(payload.new?.session_id===SESSION_ID)updatePublishLabel()
+      if(payload.new?.session_id===SESSION_ID) updatePublishLabel()
     })
     .subscribe()
 }
 
 function addLiveFromRow(row){
-  if(!row?.id||liveStickers.has(row.id))return
+  if(!row?.id || liveStickers.has(row.id)) return
   loadTex(row.image_url,(tex)=>{
-    const g=new THREE.PlaneGeometry(1,1)
+    const g=new THREE.PlaneGeometry(1,1) // l’historique peut contenir ancien format carré
     const m=new THREE.MeshBasicMaterial({ map:tex, transparent:true })
     const mesh=new THREE.Mesh(g,m)
     mesh.position.fromArray(row.position)
@@ -407,7 +402,7 @@ function addLiveFromRow(row){
 // HELPERS
 // ===========================================================
 function loadTex(url,cb){
-  if(textureCache.has(url))return cb(textureCache.get(url))
+  if(textureCache.has(url)) return cb(textureCache.get(url))
   new THREE.TextureLoader().load(url,(t)=>{
     t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8
     textureCache.set(url,t); cb(t)
