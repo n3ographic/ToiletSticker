@@ -1,42 +1,38 @@
 <!doctype html>
-<html lang="fr">
+<html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Toilet Sticker 3D</title>
-    <style>
-      html,body{margin:0;height:100%;background:#000;color:#fff;font:14px/1.4 system-ui,sans-serif}
-      #scene{position:fixed;inset:0}
-      #ui{position:fixed;top:12px;left:12px;z-index:10;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);padding:10px 12px;border-radius:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-      .row{display:flex;align-items:center;gap:8px}
-      input[type="range"]{width:140px}
-      button{background:#1f1f1f;border:1px solid #3a3a3a;color:#fff;cursor:pointer;padding:6px 10px;border-radius:8px}
-      button:hover{background:#2a2a2a}
-      .sep{width:1px;height:24px;background:#444;margin:0 6px}
-      #status{opacity:.9;min-width:220px}
-      small.muted{opacity:.7}
-    </style>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Toilet Sticker</title>
+    <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
+    <!-- Top UI bar -->
     <div id="ui">
-      <div class="row">
-        <input type="file" id="stickerInput" accept="image/*" />
-        <span id="status">Boot…</span>
-      </div>
-      <span class="sep"></span>
-      <div class="row"><label for="scale">Taille</label><input id="scale" type="range" min="0.05" max="1.0" step="0.01" value="0.35" /></div>
-      <div class="row"><label for="rotation">Rotation</label><input id="rotation" type="range" min="-180" max="180" step="1" value="0" /></div>
-      <div class="row"><label for="exposure">Lumière</label><input id="exposure" type="range" min="0.5" max="2.0" step="0.05" value="1.2" /></div>
-      <span class="sep"></span>
-      <button id="centerOrbit">Recentrer</button>
-      <span class="sep"></span>
-      <button id="publishBtn">Publier</button>
-      <button id="removeBtn">Remove</button>
-      <button id="resetBtn">Reset</button>
-      <small class="muted" id="liveInfo">Live …</small>
+      <label class="file">
+        <input id="stickerInput" type="file" accept="image/*" />
+        <span>Choose a file</span>
+      </label>
+
+      <label class="ctrl">
+        <span>Size</span>
+        <input id="sizeRange" type="range" min="0.1" max="1.0" step="0.01" value="0.35" />
+      </label>
+
+      <label class="ctrl">
+        <span>Rotation</span>
+        <input id="rotRange" type="range" min="-180" max="180" step="1" value="0" />
+      </label>
+
+      <button id="removeBtn" class="ghost">Remove</button>
+      <button id="publishBtn">Publish 0/2</button>
+
+      <span id="status" class="status"></span>
     </div>
 
+    <!-- WebGL mount -->
     <div id="scene"></div>
+
     <script type="module" src="/main.js"></script>
   </body>
 </html>
