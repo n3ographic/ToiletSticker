@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/:all*(glb|gltf|bin|png|jpg|jpeg|webp)", "destination": "/:all" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}
