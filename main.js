@@ -1,4 +1,4 @@
-// main.js — ToiletSticker (360 Orbit + fix + Supabase + anti-drag click)
+// main.js — ToiletSticker (360 Orbit + robust click + orientation fix + Supabase)
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -81,14 +81,15 @@ function init() {
   controls.enableDamping = true
   controls.dampingFactor = 0.08
 
-  // 🔓 360° complet autour du point fixe (vertical & horizontal)
+  // 360° complet
   const EPS = 1e-3
-  controls.minPolarAngle = EPS                  // ~0 rad
-  controls.maxPolarAngle = Math.PI - EPS        // ~π rad
+  controls.minPolarAngle = EPS
+  controls.maxPolarAngle = Math.PI - EPS
   controls.minAzimuthAngle = -Infinity
   controls.maxAzimuthAngle =  Infinity
 
   addUIEvents()
+  installRobustClick()
   loadModel()
 
   window.addEventListener('resize', () => {
@@ -128,11 +129,10 @@ function centerOrbit(root, eyeH=1.2){
   controls.target.set(c.x, floor + eyeH, c.z)
   camera.position.set(c.x, floor + eyeH + 0.4, c.z + r)
 
-  // 🔒 distance fixe (on reste sur un anneau autour du centre)
+  // distance fixe
   controls.minDistance = r * 0.9
   controls.maxDistance = r * 0.9
 
-  // ⚠️ NE PAS réécrire min/max polar ici (on garde le 360° défini dans init)
   controls.update()
 }
 
@@ -144,7 +144,7 @@ function findFloorY(root, c, box){
 }
 
 // ===========================================================
-// UI EVENTS + CLICK GUARD
+// UI EVENTS
 // ===========================================================
 function addUIEvents(){
   fileInput.addEventListener('change', (e)=>{
@@ -171,32 +171,57 @@ function addUIEvents(){
 
   removeBtn.addEventListener('click', removeLocalSticker)
   publishBtn.addEventListener('click', publishSticker)
+}
 
-  // --- Click-vs-Drag guard ---
+// ===========================================================
+// ROBUST CLICK (no place during orbit drag)
+// ===========================================================
+function installRobustClick(){
+  // Variables d'état
   let downX=0, downY=0, downT=0, moved=false, isOrbiting=false
-  controls.addEventListener('start', ()=>isOrbiting=true)
-  controls.addEventListener('end',   ()=>isOrbiting=false)
+  let downTarget = null
+  let lastOrbitEnd = 0
 
-  renderer.domElement.addEventListener('pointerdown', e=>{
+  const px = Math.max(6, 6 * (window.devicePixelRatio || 1)) // seuil distance en px
+  const px2 = px * px
+  const maxDuration = 500 // ms
+
+  controls.addEventListener('start', ()=>{ isOrbiting = true })
+  controls.addEventListener('end',   ()=>{ isOrbiting = false; lastOrbitEnd = performance.now() })
+
+  renderer.domElement.addEventListener('pointerdown', (e)=>{
+    if (e.button !== 0) return // gauche uniquement
+    downTarget = e.target
     downX=e.clientX; downY=e.clientY; downT=performance.now(); moved=false
-  })
-  renderer.domElement.addEventListener('pointermove', e=>{
+  }, { passive: true })
+
+  renderer.domElement.addEventListener('pointermove', (e)=>{
     if (moved) return
     const dx=e.clientX-downX, dy=e.clientY-downY
-    if (dx*dx+dy*dy>36) moved=true // >6px
-  })
-  renderer.domElement.addEventListener('pointerup', e=>{
+    if (dx*dx+dy*dy > px2) moved=true
+  }, { passive: true })
+
+  renderer.domElement.addEventListener('pointerup', (e)=>{
     const dt=performance.now()-downT
     const dx=e.clientX-downX, dy=e.clientY-downY
     const dist2=dx*dx+dy*dy
-    if (isOrbiting || moved || dist2>36 || dt>300) return // pas un "vrai" clic
+    const sinceOrbit = performance.now() - lastOrbitEnd
+
+    // Garde-fous : canvas visé, pas orbit, pas bougé, pas long press, cible identique, petite latence post-orbit
+    if (e.button !== 0) return
+    if (downTarget !== renderer.domElement) return
+    if (isOrbiting || moved || dist2>px2 || dt>maxDuration || sinceOrbit < 80) return
+
+    // OK: vrai clic → tentative de placement
     tryPlaceStickerFromPointer(e)
-  })
+  }, { passive: true })
+
+  // éviter le menu contextuel parasite
+  renderer.domElement.addEventListener('contextmenu', (e)=> e.preventDefault())
 }
 
-// pose au clic court
 function tryPlaceStickerFromPointer(ev){
-  if (!stickerTexture) return
+  if (!stickerTexture || !modelRoot) return
   const rect=renderer.domElement.getBoundingClientRect()
   const mouse=new THREE.Vector2(
     ((ev.clientX-rect.left)/rect.width)*2-1,
@@ -204,9 +229,12 @@ function tryPlaceStickerFromPointer(ev){
   )
   const ray=new THREE.Raycaster()
   ray.setFromCamera(mouse,camera)
-  const hits=ray.intersectObjects(scene.children,true)
+
+  // IMPORTANT: on intersecte SEULEMENT le modèle (évite de cliquer sur le sticker lui-même)
+  const hits=ray.intersectObjects([modelRoot], true)
   if(!hits.length)return
   const hit=hits[0]
+
   let n=new THREE.Vector3(0,0,1)
   if(hit.face?.normal){
     n.copy(hit.face.normal)
