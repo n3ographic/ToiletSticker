@@ -11,8 +11,8 @@ const MODEL_URL = '/toilet.glb'
 const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
-const BUCKET = 'stickers'
-const TABLE  = 'stickers'
+const BUCKET = 'stickers'   // Storage (Public)
+const TABLE  = 'stickers'   // Table Postgres (avec RLS SELECT/INSERT)
 const SESSION_ID = crypto.randomUUID()
 
 // ====== UI ======
@@ -37,8 +37,8 @@ let stickerScale = parseFloat(scaleInput.value)
 let stickerRotZ = 0
 let stickerAxis = new THREE.Vector3(0, 0, 1)
 let baseQuat = new THREE.Quaternion()
-const textureCache = new Map() // url -> THREE.Texture
-const liveStickers = new Map() // id  -> THREE.Mesh
+const textureCache = new Map()   // url -> THREE.Texture
+const liveStickers = new Map()   // id  -> THREE.Mesh
 
 // ---------- Init ----------
 init()
@@ -76,8 +76,17 @@ function init() {
     camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h)
   })
 
+  // UI bind
   exposureInput.addEventListener('input', () => renderer.toneMappingExposure = parseFloat(exposureInput.value))
   centerBtn.addEventListener('click', () => modelRoot && centerCameraOrbit(modelRoot))
+  removeBtn.addEventListener('click', removeLocalSticker)
+  resetBtn.addEventListener('click', () => {
+    scaleInput.value = '0.35'; rotInput.value = '0'; exposureInput.value = '1.2'
+    renderer.toneMappingExposure = 1.2; stickerScale = 0.35; stickerRotZ = 0
+    if (stickerMesh) { stickerMesh.scale.set(stickerScale, stickerScale, 1); applyStickerRotation() }
+    localStorage.removeItem(LS_KEY); statusEl.textContent = 'Réinitialisé'
+  })
+  publishBtn.addEventListener('click', publishSticker)
 
   scaleInput.addEventListener('input', () => {
     stickerScale = parseFloat(scaleInput.value)
@@ -88,17 +97,7 @@ function init() {
     if (stickerMesh) { applyStickerRotation(); saveSticker() }
   })
 
-  removeBtn.addEventListener('click', removeLocalSticker)
-  resetBtn.addEventListener('click', () => {
-    scaleInput.value = '0.35'; rotInput.value = '0'; exposureInput.value = '1.2'
-    renderer.toneMappingExposure = 1.2; stickerScale = 0.35; stickerRotZ = 0
-    if (stickerMesh) { stickerMesh.scale.set(stickerScale, stickerScale, 1); applyStickerRotation() }
-    localStorage.removeItem(LS_KEY); statusEl.textContent = 'Réinitialisé'
-  })
-
-  publishBtn.addEventListener('click', publishSticker)
-
-  // Upload image
+  // Upload image locale
   fileInput.addEventListener('change', (e) => {
     const file = e.target.files?.[0]; if (!file) return
     const url = URL.createObjectURL(file)
@@ -126,8 +125,8 @@ function init() {
     ray.setFromCamera(mouse, camera)
     const hits = ray.intersectObjects(scene.children, true)
     if (!hits.length) return
-    const hit = hits[0]
 
+    const hit = hits[0]
     let normal = new THREE.Vector3(0,0,1)
     if (hit.face?.normal) {
       normal.copy(hit.face.normal)
@@ -272,14 +271,17 @@ async function publishSticker() {
     const filename = `${SESSION_ID}-${Date.now()}.${ext}`
     const path = `users/${SESSION_ID}/${filename}`
 
+    // Upload dans Storage
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
       upsert: true, contentType: file.type
     })
     if (upErr) throw upErr
 
+    // URL publique
     const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path)
     const image_url = pub.publicUrl
 
+    // Ligne dans la table (positions + quat)
     const row = {
       session_id: SESSION_ID,
       image_url,
@@ -300,11 +302,13 @@ async function publishSticker() {
 
 async function bootstrapLive() {
   try {
+    // 1) charge l’historique
     const { data, error } = await supabase.from(TABLE)
       .select('*').order('created_at', { ascending: true }).limit(500)
     if (error) throw error
     data?.forEach(addLiveStickerFromRow)
 
+    // 2) écoute en temps réel
     supabase
       .channel('stickers-live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLE }, payload => {
