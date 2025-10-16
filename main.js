@@ -53,8 +53,6 @@ let stickerTexture = null, stickerMesh = null
 let stickerScale = parseFloat(sizeRange?.value ?? '0.35')
 let stickerRotZ  = 0
 let baseQuat = new THREE.Quaternion()
-
-// ✅ nouveau : garde l’axe du mur pour la colonne `axis`
 let lastWallNormal = new THREE.Vector3(0, 0, 1)
 
 const LS_KEY = 'toilet-sticker-save'
@@ -77,6 +75,8 @@ init()
 animate()
 bootstrapLive().then(updatePublishLabel).catch(console.warn)
 fetchClientIp()
+  .finally(() => updatePublishLabel()) // 🔥 MAJ du bouton après IP
+  .catch(() => {})
 
 // ===========================================================
 function init(){
@@ -95,8 +95,13 @@ function init(){
   renderer.shadowMap.enabled = true
   container.appendChild(renderer.domElement)
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.9); hemi.position.set(0,4,0); scene.add(hemi)
-  const dir  = new THREE.DirectionalLight(0xffffff, 1.3); dir.position.set(3.5,6,2.2); dir.castShadow=true; scene.add(dir)
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.9)
+  hemi.position.set(0,4,0)
+  scene.add(hemi)
+  const dir  = new THREE.DirectionalLight(0xffffff, 1.3)
+  dir.position.set(3.5,6,2.2)
+  dir.castShadow=true
+  scene.add(dir)
 
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableZoom = false
@@ -121,6 +126,14 @@ function init(){
     camera.updateProjectionMatrix()
     renderer.setSize(innerWidth, innerHeight)
   })
+
+  // 🔥 état initial du bouton Publish
+  if (publishBtn) {
+    publishBtn.textContent = 'Checking…'
+    publishBtn.disabled = true
+    publishBtn.style.opacity = 0.5
+    publishBtn.style.cursor = 'wait'
+  }
 }
 
 function loadModel(){
@@ -146,10 +159,8 @@ function centerOrbit(root, eyeH=1.2){
   const floor = findFloorY(root, c, box)
   const ext = new THREE.Vector3().subVectors(box.max, box.min)
   const r = Math.max(ext.x, ext.z) * 0.6
-
   controls.target.set(c.x, floor + eyeH, c.z)
   camera.position.set(c.x, floor + eyeH + 0.4, c.z + r)
-
   controls.minDistance = r * 0.9
   controls.maxDistance = r * 0.9
   controls.update()
@@ -204,18 +215,11 @@ function addUIEvents(){
 // ---------------- Collage au click simple robuste ----------------
 function installClickToPlace() {
   let movedSinceDown = false;
-
-  renderer.domElement.addEventListener('pointerdown', () => {
-    movedSinceDown = false;
-  });
-
-  controls.addEventListener('change', () => {
-    movedSinceDown = true;
-  });
-
+  renderer.domElement.addEventListener('pointerdown', () => movedSinceDown = false);
+  controls.addEventListener('change', () => movedSinceDown = true);
   renderer.domElement.addEventListener('click', (e) => {
-    if (movedSinceDown) return;         // drag → ignore
-    tryPlaceStickerFromPointer(e);       // click simple → colle
+    if (movedSinceDown) return;
+    tryPlaceStickerFromPointer(e);
   });
 }
 
@@ -245,10 +249,7 @@ function tryPlaceStickerFromPointer(ev){
 
   const EPS=0.006
   const p = hit.point.clone().add(n.clone().multiplyScalar(EPS))
-
-  // ✅ on mémorise l’axe du mur pour la colonne `axis`
   lastWallNormal.copy(n)
-
   placeOrMoveSticker(p, n)
   saveSticker()
 }
@@ -309,7 +310,6 @@ function saveSticker(){
     baseQuat:   baseQuat.toArray(),
     scale:      stickerScale,
     rotZ:       stickerRotZ,
-    // ✅ stocke aussi l’axe
     axis:       lastWallNormal?.toArray?.() || [0,0,1]
   }
   localStorage.setItem(LS_KEY, JSON.stringify(d))
@@ -321,8 +321,8 @@ function loadSticker(texture){
     const d = JSON.parse(raw)
     stickerMesh = createStickerMeshFromTexture(texture)
     stickerMesh.position.fromArray(d.position)
-    stickerScale = d.scale ?? 0.35; if (sizeRange) sizeRange.value = String(stickerScale)
-    stickerRotZ  = d.rotZ  ?? 0;    if (rotRange)  rotRange.value  = String((stickerRotZ*180)/Math.PI)
+    stickerScale = d.scale ?? 0.35
+    stickerRotZ  = d.rotZ  ?? 0
     stickerMesh.scale.set(stickerScale, stickerScale, 1)
     if(d.baseQuat){ baseQuat.fromArray(d.baseQuat); applyStickerRotation() }
     else{
@@ -330,7 +330,6 @@ function loadSticker(texture){
       const qR = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), stickerRotZ)
       baseQuat.copy(qF).multiply(qR.invert()); applyStickerRotation()
     }
-    // ✅ restore axis si dispo
     if (d.axis) lastWallNormal.fromArray(d.axis)
     scene.add(stickerMesh)
   }catch(e){ console.warn('Load sticker error', e) }
@@ -374,7 +373,6 @@ async function publishSticker(){
       quaternion: stickerMesh.quaternion.toArray(),
       scale:      stickerScale,
       rotz:       stickerRotZ,
-      // ✅ envoi de la colonne `axis`
       axis:       lastWallNormal ? lastWallNormal.toArray() : [0,0,1]
     }
 
@@ -388,10 +386,6 @@ async function publishSticker(){
     const m = String(e?.message || e)
     if (m.includes('violates row-level security') || m.includes('quota_ok'))
       status('⛔ Limit reached: 2 stickers / 24h')
-    else if (m.includes('Bucket'))
-      status('⛔ Storage policy issue')
-    else if (m.includes('JWT') || m.includes('Unauthorized'))
-      status('❌ Auth (check VITE_SUPABASE_URL / VITE_SUPABASE_ANON)')
     else
       status('❌ Publish error')
     cooldownPublish()
@@ -405,7 +399,6 @@ async function publishSticker(){
 async function bootstrapLive(){
   const { data, error } = await supabase.from(TABLE).select('*').order('created_at',{ascending:true}).limit(500)
   if (!error) data?.forEach(addLiveFromRow)
-
   supabase
     .channel('stickers-live')
     .on('postgres_changes',{ event:'INSERT', schema:'public', table:TABLE }, payload=>{
@@ -431,23 +424,12 @@ function addLiveFromRow(row){
 }
 
 // ===========================================================
-// CLEAN ALL (admin) — DB + Storage récursif
+// CLEAN ALL (admin)
 async function deleteAllStickers() {
   if (!confirm('Delete ALL stickers for everyone?')) return
   try {
-    // 1) Delete DB
     const del = await supabase.from(TABLE).delete().not('id', 'is', null)
-    if (del.error) { console.error('DB delete error:', del.error); throw del.error }
-
-    // 2) Purge Storage récursive
-    const keys = await listAllStorageKeysRecursive('')
-    while (keys.length) {
-      const chunk = keys.splice(0, 100)
-      const rem = await supabase.storage.from(BUCKET).remove(chunk)
-      if (rem.error) { console.error('Storage remove error:', rem.error); throw rem.error }
-    }
-
-    // 3) Reset scène
+    if (del.error) throw del.error
     liveStickers.forEach(mesh => scene.remove(mesh))
     liveStickers.clear()
     status('💥 All stickers purged')
@@ -457,118 +439,8 @@ async function deleteAllStickers() {
   }
 }
 
-async function listAllStorageKeysRecursive(prefix) {
-  const all = []
-  const { data, error } = await supabase.storage.from(BUCKET).list(prefix, { limit: 1000 })
-  if (error) throw error
-
-  for (const item of data || []) {
-    const full = prefix ? `${prefix}/${item.name}` : item.name
-    if (item.id) {
-      all.push(full)     // fichier
-    } else {
-      const sub = await listAllStorageKeysRecursive(full) // dossier
-      all.push(...sub)
-    }
-  }
-  return all
-}
-
 // ===========================================================
 // ADMIN BAR (Shift + A)
 let adminOpen=false, adminUnlocked=false
-
 function installAdminHotkey(){
-  window.addEventListener('keydown', (e)=>{
-    if (e.key.toLowerCase()==='a' && e.shiftKey) toggleAdminBar()
-  })
-}
-function toggleAdminBar(){
-  adminOpen = !adminOpen
-  adminBar.setAttribute('aria-hidden', adminOpen?'false':'true')
-  if (adminOpen){
-    if (adminUnlocked) showAdminUnlocked()
-    else showAdminLocked()
-  }
-}
-function lockAdminBar(hide=false){
-  adminUnlocked=false
-  adminTitle.textContent='Admin'
-  adminLockedRow.hidden=false
-  adminUnlockedRow.hidden=true
-  if(hide){ adminOpen=false; adminBar.setAttribute('aria-hidden','true') }
-}
-function unlockAdminBar(){ adminUnlocked=true; showAdminUnlocked() }
-function showAdminLocked(){
-  adminTitle.textContent='Admin'
-  adminLockedRow.hidden=false
-  adminUnlockedRow.hidden=true
-  adminPassInput.value=''; adminPassInput.focus()
-}
-function showAdminUnlocked(){
-  adminTitle.textContent='Admin connected'
-  adminLockedRow.hidden=true
-  adminUnlockedRow.hidden=false
-}
-
-// ===========================================================
-// Helpers
-function loadTex(url, cb){
-  if (textureCache.has(url)) return cb(textureCache.get(url))
-  new THREE.TextureLoader().load(url, (t)=>{
-    t.colorSpace = THREE.SRGBColorSpace
-    t.anisotropy = 8
-    textureCache.set(url,t)
-    cb(t)
-  })
-}
-function status(txt){ if(statusEl) statusEl.textContent = txt }
-
-// Compte le nombre de stickers publiés par cette session sur 24h glissantes
-async function getTodayCount(){
-  const since = new Date(Date.now() - 24*60*60*1000).toISOString()
-  const res = await supabase.from(TABLE)
-    .select('id', { count:'exact', head:true })
-    .gte('created_at', since)
-    .eq('session_id', SESSION_ID)
-  return res?.count ?? 0
-}
-
-// Met à jour le label + état du bouton Publish
-async function updatePublishLabel() {
-  try {
-    const c = await getTodayCount()
-    if (!publishBtn) return
-
-    if (c >= 2) {
-      publishBtn.textContent = 'Blocked'
-      publishBtn.disabled = true
-      publishBtn.style.opacity = 0.5
-      publishBtn.style.cursor = 'not-allowed'
-    } else {
-      publishBtn.textContent = `Publish ${c}/2`
-      publishBtn.disabled = false
-      publishBtn.style.opacity = 1
-      publishBtn.style.cursor = 'pointer'
-    }
-  } catch (e) {
-    console.warn('updatePublishLabel error', e)
-  }
-}
-
-function lockPublish(enabled){ if (publishBtn) publishBtn.disabled = !enabled }
-
-// Petit cooldown lorsqu’un publish échoue
-function cooldownPublish(){
-  if (!publishBtn) return
-  if (publishBtn.textContent === 'Blocked') return
-  publishBtn.disabled = true
-  let t=10
-  const iv=setInterval(()=>{
-    publishBtn.textContent = `Retry in ${t}s`
-    if(--t<=0){ clearInterval(iv); updatePublishLabel(); publishBtn.disabled=false }
-  },1000)
-}
-
-// ===========================================================
-function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene,camera) }
+  window.addEventListener('keydown
