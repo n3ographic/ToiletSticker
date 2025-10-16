@@ -1,10 +1,6 @@
 // main.js — Toilet Sticker (Three.js + Supabase)
-// - Orbit 360° (pas de pan/zoom)
-// - Collage au click simple : ignore si un drag a eu lieu entre pointerdown et click
-// - Ratio image respecté (plane selon ratio de l’image)
-// - Publish limité (2/24h via RLS), bouton devient "Blocked"
-// - Realtime + fetch initial
-// - Admin bar (Shift + A) avec Clean all (DELETE all + purge Storage récursive)
+// Orbit 360°, collage au click simple, ratio image respecté,
+// Publish limité 2/24h (RLS), live realtime, Admin bar (Shift+A) clean all.
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -16,12 +12,12 @@ import { createClient } from '@supabase/supabase-js'
 // ---------------- CONFIG ----------------
 const MODEL_URL = '/toilet.glb'
 const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON     // <= nom exact attendu sur Vercel
+const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || ''
 const BUCKET = 'stickers'
 const TABLE  = 'stickers'
 
-// Petit log sanitaire pour éviter le 401 silencieux si env manquantes
+// Sanity log (évite 401 silencieux si env manquantes)
 console.log('[ENV]', {
   url: SUPABASE_URL,
   hasAnon: !!SUPABASE_ANON,
@@ -328,8 +324,9 @@ function loadSticker(texture){
     stickerMesh.scale.set(stickerScale, stickerScale, 1)
     if(d.baseQuat){ baseQuat.fromArray(d.baseQuat); applyStickerRotation() }
     else{
-      const qF=new THREE.Quaternio n().fromArray(d.quaternion)
-      const qR=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), stickerRotZ)
+      // ✅ FIX: pas d’espace — Quaternion
+      const qF = new THREE.Quaternion().fromArray(d.quaternion)
+      const qR = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), stickerRotZ)
       baseQuat.copy(qF).multiply(qR.invert()); applyStickerRotation()
     }
     scene.add(stickerMesh)
@@ -348,7 +345,7 @@ function removeLocalSticker(){
 }
 
 // ===========================================================
-// PUBLISH (client envoie client_ip ; RLS limite à 2/24h)
+// PUBLISH (limité par RLS 2/24h)
 async function publishSticker(){
   if(!stickerMesh || !fileInput?.files?.[0]) return status('⚠️ Pick a file and place it first')
   try{
@@ -416,7 +413,6 @@ async function bootstrapLive(){
 function addLiveFromRow(row){
   if (!row?.id || liveStickers.has(row.id)) return
   loadTex(row.image_url, (tex)=>{
-    // (les anciens collages déjà publiés peuvent être carrés)
     const g = new THREE.PlaneGeometry(1,1)
     const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     const mesh = new THREE.Mesh(g,m)
@@ -434,7 +430,7 @@ function addLiveFromRow(row){
 async function deleteAllStickers() {
   if (!confirm('Delete ALL stickers for everyone?')) return
   try {
-    // 1) Delete DB (compatible UUID ou INT)
+    // 1) Delete DB
     const del = await supabase.from(TABLE).delete().not('id', 'is', null)
     if (del.error) { console.error('DB delete error:', del.error); throw del.error }
 
@@ -456,7 +452,6 @@ async function deleteAllStickers() {
   }
 }
 
-/** Liste récursivement toutes les paths du bucket. */
 async function listAllStorageKeysRecursive(prefix) {
   const all = []
   const { data, error } = await supabase.storage.from(BUCKET).list(prefix, { limit: 1000 })
