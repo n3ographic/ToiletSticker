@@ -16,10 +16,17 @@ import { createClient } from '@supabase/supabase-js'
 // ---------------- CONFIG ----------------
 const MODEL_URL = '/toilet.glb'
 const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '' // client-side (prototype)
+const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON     // <= nom exact attendu sur Vercel
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || ''
 const BUCKET = 'stickers'
 const TABLE  = 'stickers'
+
+// Petit log sanitaire pour éviter le 401 silencieux si env manquantes
+console.log('[ENV]', {
+  url: SUPABASE_URL,
+  hasAnon: !!SUPABASE_ANON,
+  anonPrefix: SUPABASE_ANON?.slice(0, 12) + '…'
+})
 
 // Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
@@ -42,10 +49,10 @@ const removeBtn   = document.getElementById('removeBtn')
 const publishBtn  = document.getElementById('publishBtn')
 
 // Admin footer bar (Shift + A)
-const adminBar       = document.getElementById('adminBar')
-const adminTitle     = document.getElementById('adminTitle')
-const adminPassInput = document.getElementById('adminPassword')
-const adminEnterBtn  = document.getElementById('adminEnter')
+const adminBar         = document.getElementById('adminBar')
+const adminTitle       = document.getElementById('adminTitle')
+const adminPassInput   = document.getElementById('adminPassword')
+const adminEnterBtn    = document.getElementById('adminEnter')
 const adminLockedRow   = document.getElementById('adminLocked')
 const adminUnlockedRow = document.getElementById('adminUnlocked')
 const adminCloseBtn    = document.getElementById('adminClose')
@@ -62,7 +69,6 @@ const LS_KEY = 'toilet-sticker-save'
 const liveStickers = new Map()
 const textureCache = new Map()
 
-// IP (pour affichage client ; la RLS peut fallback sur header côté infra)
 let CLIENT_IP = null, fetchIpPromise = null
 function fetchClientIp(){
   if (CLIENT_IP) return Promise.resolve(CLIENT_IP)
@@ -114,7 +120,7 @@ function init(){
 
   addUIEvents()
   installAdminHotkey()
-  installClickToPlace()       // <— click simple robuste
+  installClickToPlace()
 
   loadModel()
 
@@ -204,8 +210,6 @@ function addUIEvents(){
 }
 
 // ---------------- Collage au click simple robuste ----------------
-// Logique : si OrbitControls a émis un 'change' entre pointerdown et click,
-// alors il y a eu drag → on n’insère pas. Sinon, on colle.
 function installClickToPlace() {
   let movedSinceDown = false;
 
@@ -218,8 +222,8 @@ function installClickToPlace() {
   });
 
   renderer.domElement.addEventListener('click', (e) => {
-    if (movedSinceDown) return;         // un drag a eu lieu → on ignore
-    tryPlaceStickerFromPointer(e);       // pas de drag → on colle
+    if (movedSinceDown) return;         // drag → ignore
+    tryPlaceStickerFromPointer(e);       // click simple → colle
   });
 }
 
@@ -324,7 +328,7 @@ function loadSticker(texture){
     stickerMesh.scale.set(stickerScale, stickerScale, 1)
     if(d.baseQuat){ baseQuat.fromArray(d.baseQuat); applyStickerRotation() }
     else{
-      const qF=new THREE.Quaternion().fromArray(d.quaternion)
+      const qF=new THREE.Quaternio n().fromArray(d.quaternion)
       const qR=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), stickerRotZ)
       baseQuat.copy(qF).multiply(qR.invert()); applyStickerRotation()
     }
@@ -382,8 +386,12 @@ async function publishSticker(){
     const m = String(e?.message || e)
     if (m.includes('violates row-level security') || m.includes('quota_ok'))
       status('⛔ Limit reached: 2 stickers / 24h')
-    else if (m.includes('Bucket')) status('⛔ Storage policy issue')
-    else status('❌ Publish error')
+    else if (m.includes('Bucket'))
+      status('⛔ Storage policy issue')
+    else if (m.includes('JWT') || m.includes('Unauthorized'))
+      status('❌ Auth (check VITE_SUPABASE_URL / VITE_SUPABASE_ANON)')
+    else
+      status('❌ Publish error')
     cooldownPublish()
   }finally{
     lockPublish(true)
@@ -408,7 +416,8 @@ async function bootstrapLive(){
 function addLiveFromRow(row){
   if (!row?.id || liveStickers.has(row.id)) return
   loadTex(row.image_url, (tex)=>{
-    const g = new THREE.PlaneGeometry(1,1) // legacy (anciens collages carrés)
+    // (les anciens collages déjà publiés peuvent être carrés)
+    const g = new THREE.PlaneGeometry(1,1)
     const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
     const mesh = new THREE.Mesh(g,m)
     mesh.position.fromArray(row.position)
@@ -549,7 +558,7 @@ async function updatePublishLabel() {
 
 function lockPublish(enabled){ if (publishBtn) publishBtn.disabled = !enabled }
 
-// Petit cooldown lorsqu’un publish échoue (réseau, etc.)
+// Petit cooldown lorsqu’un publish échoue
 function cooldownPublish(){
   if (!publishBtn) return
   if (publishBtn.textContent === 'Blocked') return
