@@ -1,5 +1,5 @@
 // main.js — Toilet Sticker (Three.js + Supabase)
-// Orbit 360°, collage au click simple, ratio image respecté,
+// Orbit 360°, collage click simple, ratio image respecté,
 // Publish limité 2/24h (RLS), live realtime, Admin bar (Shift+A) clean all.
 
 import * as THREE from 'three'
@@ -21,10 +21,10 @@ const TABLE  = 'stickers'
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
 
 // ---------------- SESSION / DOM ----------------
-function getOrCreateSessionId(){
-  const k='TOILET_SESSION_ID'
+function getOrCreateSessionId() {
+  const k = 'TOILET_SESSION_ID'
   let id = localStorage.getItem(k)
-  if(!id){ id=crypto.randomUUID(); localStorage.setItem(k,id) }
+  if (!id) { id = crypto.randomUUID(); localStorage.setItem(k, id) }
   return id
 }
 const SESSION_ID = getOrCreateSessionId()
@@ -60,13 +60,13 @@ const liveStickers = new Map()
 const textureCache = new Map()
 
 let CLIENT_IP = null, fetchIpPromise = null
-function fetchClientIp(){
+function fetchClientIp() {
   if (CLIENT_IP) return Promise.resolve(CLIENT_IP)
   if (fetchIpPromise) return fetchIpPromise
   fetchIpPromise = fetch('https://api.ipify.org?format=json')
     .then(r => r.ok ? r.json() : Promise.reject())
     .then(j => (CLIENT_IP = j.ip || null))
-    .catch(()=> (CLIENT_IP = null))
+    .catch(() => (CLIENT_IP = null))
   return fetchIpPromise
 }
 
@@ -74,20 +74,18 @@ function fetchClientIp(){
 init()
 animate()
 bootstrapLive().then(updatePublishLabel).catch(console.warn)
-fetchClientIp()
-  .finally(() => updatePublishLabel()) // 🔥 MAJ du bouton après IP
-  .catch(() => {})
+fetchClientIp().finally(() => updatePublishLabel()).catch(() => {})
 
 // ===========================================================
-function init(){
+function init() {
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x000000)
 
-  const w=innerWidth, h=innerHeight
-  camera = new THREE.PerspectiveCamera(60, w/h, 0.1, 150)
+  const w = innerWidth, h = innerHeight
+  camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 150)
   camera.position.set(0, 1.55, 2.6)
 
-  renderer = new THREE.WebGLRenderer({ antialias:true })
+  renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setSize(w, h)
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -96,16 +94,16 @@ function init(){
   container.appendChild(renderer.domElement)
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.9)
-  hemi.position.set(0,4,0)
+  hemi.position.set(0, 4, 0)
   scene.add(hemi)
-  const dir  = new THREE.DirectionalLight(0xffffff, 1.3)
-  dir.position.set(3.5,6,2.2)
-  dir.castShadow=true
+  const dir = new THREE.DirectionalLight(0xffffff, 1.3)
+  dir.position.set(3.5, 6, 2.2)
+  dir.castShadow = true
   scene.add(dir)
 
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableZoom = false
-  controls.enablePan  = false
+  controls.enablePan = false
   controls.rotateSpeed = 0.55
   controls.enableDamping = true
   controls.dampingFactor = 0.08
@@ -121,13 +119,13 @@ function init(){
 
   loadModel()
 
-  window.addEventListener('resize', ()=>{
-    camera.aspect = innerWidth/innerHeight
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight
     camera.updateProjectionMatrix()
     renderer.setSize(innerWidth, innerHeight)
   })
 
-  // 🔥 état initial du bouton Publish
+  // État initial du bouton Publish
   if (publishBtn) {
     publishBtn.textContent = 'Checking…'
     publishBtn.disabled = true
@@ -136,26 +134,26 @@ function init(){
   }
 }
 
-function loadModel(){
+function loadModel() {
   status('Loading 3D…')
   const loader = new GLTFLoader()
-  const draco  = new DRACOLoader()
+  const draco = new DRACOLoader()
   draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/')
   loader.setDRACOLoader(draco)
   loader.setMeshoptDecoder(MeshoptDecoder)
 
-  loader.load(MODEL_URL, (gltf)=>{
+  loader.load(MODEL_URL, (gltf) => {
     modelRoot = gltf.scene
-    modelRoot.traverse(o => { if (o.isMesh){ o.castShadow=true; o.receiveShadow=true } })
+    modelRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
     scene.add(modelRoot)
     centerOrbit(modelRoot)
     status('✅ Ready — pick a file, click a wall, then Publish')
-  }, undefined, (e)=>{ console.error(e); status('❌ Model load error') })
+  }, undefined, (e) => { console.error(e); status('❌ Model load error') })
 }
 
-function centerOrbit(root, eyeH=1.2){
+function centerOrbit(root, eyeH = 1.2) {
   const box = new THREE.Box3().setFromObject(root)
-  const c   = box.getCenter(new THREE.Vector3())
+  const c = box.getCenter(new THREE.Vector3())
   const floor = findFloorY(root, c, box)
   const ext = new THREE.Vector3().subVectors(box.max, box.min)
   const r = Math.max(ext.x, ext.z) * 0.6
@@ -166,20 +164,20 @@ function centerOrbit(root, eyeH=1.2){
   controls.update()
 }
 
-function findFloorY(root, c, box){
+function findFloorY(root, c, box) {
   const from = new THREE.Vector3(c.x, box.max.y + 0.5, c.z)
-  const rc = new THREE.Raycaster(from, new THREE.Vector3(0,-1,0))
+  const rc = new THREE.Raycaster(from, new THREE.Vector3(0, -1, 0))
   const hits = rc.intersectObjects(root.children, true)
   return hits.length ? hits[0].point.y : box.min.y
 }
 
 // ===========================================================
-function addUIEvents(){
+function addUIEvents() {
   if (fileInput) {
-    fileInput.addEventListener('change', (e)=>{
-      const f = e.target.files?.[0]; if(!f) return
+    fileInput.addEventListener('change', (e) => {
+      const f = e.target.files?.[0]; if (!f) return
       const url = URL.createObjectURL(f)
-      new THREE.TextureLoader().load(url, (t)=>{
+      new THREE.TextureLoader().load(url, (t) => {
         t.colorSpace = THREE.SRGBColorSpace
         t.anisotropy = 8
         stickerTexture = t
@@ -189,99 +187,99 @@ function addUIEvents(){
     })
   }
 
-  if (sizeRange) sizeRange.addEventListener('input', ()=>{
+  if (sizeRange) sizeRange.addEventListener('input', () => {
     stickerScale = parseFloat(sizeRange.value)
-    if (stickerMesh){ stickerMesh.scale.set(stickerScale, stickerScale, 1); saveSticker() }
+    if (stickerMesh) { stickerMesh.scale.set(stickerScale, stickerScale, 1); saveSticker() }
   })
 
-  if (rotRange) rotRange.addEventListener('input', ()=>{
+  if (rotRange) rotRange.addEventListener('input', () => {
     stickerRotZ = (parseFloat(rotRange.value) * Math.PI) / 180
-    if (stickerMesh){ applyStickerRotation(); saveSticker() }
+    if (stickerMesh) { applyStickerRotation(); saveSticker() }
   })
 
   if (removeBtn) removeBtn.addEventListener('click', removeLocalSticker)
   if (publishBtn) publishBtn.addEventListener('click', publishSticker)
 
   // Admin bar actions
-  if (adminEnterBtn) adminEnterBtn.addEventListener('click', ()=>{
+  if (adminEnterBtn) adminEnterBtn.addEventListener('click', () => {
     const v = adminPassInput.value || ''
     if (v === ADMIN_PASSWORD && ADMIN_PASSWORD !== '') unlockAdminBar()
     else alert('Wrong password')
   })
-  if (adminCloseBtn)    adminCloseBtn.addEventListener('click', ()=> lockAdminBar(true))
+  if (adminCloseBtn) adminCloseBtn.addEventListener('click', () => lockAdminBar(true))
   if (adminCleanAllBtn) adminCleanAllBtn.addEventListener('click', deleteAllStickers)
 }
 
 // ---------------- Collage au click simple robuste ----------------
 function installClickToPlace() {
-  let movedSinceDown = false;
-  renderer.domElement.addEventListener('pointerdown', () => movedSinceDown = false);
-  controls.addEventListener('change', () => movedSinceDown = true);
+  let movedSinceDown = false
+  renderer.domElement.addEventListener('pointerdown', () => (movedSinceDown = false))
+  controls.addEventListener('change', () => (movedSinceDown = true))
   renderer.domElement.addEventListener('click', (e) => {
-    if (movedSinceDown) return;
-    tryPlaceStickerFromPointer(e);
-  });
+    if (movedSinceDown) return
+    tryPlaceStickerFromPointer(e)
+  })
 }
 
 // ===========================================================
 // PLACE
-function tryPlaceStickerFromPointer(ev){
+function tryPlaceStickerFromPointer(ev) {
   if (!stickerTexture || !modelRoot) return
-  const rect=renderer.domElement.getBoundingClientRect()
-  const mouse=new THREE.Vector2(
-    ((ev.clientX-rect.left)/rect.width)*2-1,
-    -((ev.clientY-rect.top)/rect.height)*2+1
+  const rect = renderer.domElement.getBoundingClientRect()
+  const mouse = new THREE.Vector2(
+    ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+    -((ev.clientY - rect.top) / rect.height) * 2 + 1
   )
-  const ray=new THREE.Raycaster()
-  ray.setFromCamera(mouse,camera)
-  const hits=ray.intersectObjects([modelRoot], true)
-  if(!hits.length) return
+  const ray = new THREE.Raycaster()
+  ray.setFromCamera(mouse, camera)
+  const hits = ray.intersectObjects([modelRoot], true)
+  if (!hits.length) return
 
   const hit = hits[0]
-  let n = new THREE.Vector3(0,0,1)
-  if (hit.face?.normal){
+  let n = new THREE.Vector3(0, 0, 1)
+  if (hit.face?.normal) {
     n.copy(hit.face.normal)
     hit.object.updateMatrixWorld()
     n.transformDirection(hit.object.matrixWorld).normalize()
   }
-  if (Math.abs(n.y)>0.6){ status('⛔ Place on a wall'); return }
+  if (Math.abs(n.y) > 0.6) { status('⛔ Place on a wall'); return }
   n = snappedWallNormal(n)
 
-  const EPS=0.006
+  const EPS = 0.006
   const p = hit.point.clone().add(n.clone().multiplyScalar(EPS))
   lastWallNormal.copy(n)
   placeOrMoveSticker(p, n)
   saveSticker()
 }
 
-function snappedWallNormal(n){
-  const v=n.clone(); v.y=0
-  if (v.lengthSq()<1e-6) return new THREE.Vector3(0,0,1)
+function snappedWallNormal(n) {
+  const v = n.clone(); v.y = 0
+  if (v.lengthSq() < 1e-6) return new THREE.Vector3(0, 0, 1)
   v.normalize()
-  return Math.abs(v.x)>Math.abs(v.z)
-    ? new THREE.Vector3(Math.sign(v.x)||1,0,0)
-    : new THREE.Vector3(0,0,Math.sign(v.z)||1)
+  return Math.abs(v.x) > Math.abs(v.z)
+    ? new THREE.Vector3(Math.sign(v.x) || 1, 0, 0)
+    : new THREE.Vector3(0, 0, Math.sign(v.z) || 1)
 }
 
-function makeStickerQuaternion(normal){
-  const n=normal.clone().normalize()
-  const worldUp = Math.abs(n.y)>0.9 ? new THREE.Vector3(1,0,0) : new THREE.Vector3(0,1,0)
-  const tangent   = worldUp.clone().cross(n).normalize()
+function makeStickerQuaternion(normal) {
+  const n = normal.clone().normalize()
+  const worldUp = Math.abs(n.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)
+  const tangent = worldUp.clone().cross(n).normalize()
   const bitangent = n.clone().cross(tangent).normalize()
-  const m = new THREE.Matrix4().makeBasis(tangent,bitangent,n)
+  const m = new THREE.Matrix4().makeBasis(tangent, bitangent, n)
   return new THREE.Quaternion().setFromRotationMatrix(m)
 }
 
-function createStickerMeshFromTexture(tex){
+function createStickerMeshFromTexture(tex) {
   const img = tex.image
   const ratio = img ? (img.width / img.height) : 1
-  const geom = new THREE.PlaneGeometry(1*ratio, 1)
-  const mat  = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+  const geom = new THREE.PlaneGeometry(1 * ratio, 1)
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
   return new THREE.Mesh(geom, mat)
 }
 
-function placeOrMoveSticker(point, normal){
-  if(stickerMesh){
+function placeOrMoveSticker(point, normal) {
+  if (stickerMesh) {
     scene.remove(stickerMesh)
     stickerMesh.geometry?.dispose()
     stickerMesh.material?.dispose()
@@ -296,47 +294,47 @@ function placeOrMoveSticker(point, normal){
   status('Sticker placed ✓ — Publish to share')
 }
 
-function applyStickerRotation(){
-  if(!stickerMesh) return
+function applyStickerRotation() {
+  if (!stickerMesh) return
   stickerMesh.quaternion.copy(baseQuat)
-  stickerMesh.rotateOnAxis(new THREE.Vector3(0,0,1), stickerRotZ)
+  stickerMesh.rotateOnAxis(new THREE.Vector3(0, 0, 1), stickerRotZ)
 }
 
-function saveSticker(){
-  if(!stickerMesh) return
+function saveSticker() {
+  if (!stickerMesh) return
   const d = {
-    position:   stickerMesh.position.toArray(),
+    position: stickerMesh.position.toArray(),
     quaternion: stickerMesh.quaternion.toArray(),
-    baseQuat:   baseQuat.toArray(),
-    scale:      stickerScale,
-    rotZ:       stickerRotZ,
-    axis:       lastWallNormal?.toArray?.() || [0,0,1]
+    baseQuat: baseQuat.toArray(),
+    scale: stickerScale,
+    rotZ: stickerRotZ,
+    axis: lastWallNormal?.toArray?.() || [0, 0, 1]
   }
   localStorage.setItem(LS_KEY, JSON.stringify(d))
 }
 
-function loadSticker(texture){
-  const raw = localStorage.getItem(LS_KEY); if(!raw || !texture) return
-  try{
+function loadSticker(texture) {
+  const raw = localStorage.getItem(LS_KEY); if (!raw || !texture) return
+  try {
     const d = JSON.parse(raw)
     stickerMesh = createStickerMeshFromTexture(texture)
     stickerMesh.position.fromArray(d.position)
     stickerScale = d.scale ?? 0.35
-    stickerRotZ  = d.rotZ  ?? 0
+    stickerRotZ = d.rotZ ?? 0
     stickerMesh.scale.set(stickerScale, stickerScale, 1)
-    if(d.baseQuat){ baseQuat.fromArray(d.baseQuat); applyStickerRotation() }
-    else{
+    if (d.baseQuat) { baseQuat.fromArray(d.baseQuat); applyStickerRotation() }
+    else {
       const qF = new THREE.Quaternion().fromArray(d.quaternion)
-      const qR = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), stickerRotZ)
+      const qR = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), stickerRotZ)
       baseQuat.copy(qF).multiply(qR.invert()); applyStickerRotation()
     }
     if (d.axis) lastWallNormal.fromArray(d.axis)
     scene.add(stickerMesh)
-  }catch(e){ console.warn('Load sticker error', e) }
+  } catch (e) { console.warn('Load sticker error', e) }
 }
 
-function removeLocalSticker(){
-  if(stickerMesh){
+function removeLocalSticker() {
+  if (stickerMesh) {
     scene.remove(stickerMesh)
     stickerMesh.geometry?.dispose()
     stickerMesh.material?.dispose()
@@ -348,32 +346,32 @@ function removeLocalSticker(){
 
 // ===========================================================
 // PUBLISH (limité par RLS 2/24h)
-async function publishSticker(){
-  if(!stickerMesh || !fileInput?.files?.[0]) return status('⚠️ Pick a file and place it first')
-  try{
+async function publishSticker() {
+  if (!stickerMesh || !fileInput?.files?.[0]) return status('⚠️ Pick a file and place it first')
+  try {
     lockPublish(false)
     status('Uploading…')
 
-    const ip   = await fetchClientIp()
+    const ip = await fetchClientIp()
     const file = fileInput.files[0]
-    const ext  = (file.name.split('.').pop()||'png').toLowerCase()
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase()
     const path = `users/${SESSION_ID}/${Date.now()}.${ext}`
 
-    const up = await supabase.storage.from(BUCKET).upload(path, file, { upsert:true, contentType:file.type })
+    const up = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: file.type })
     if (up.error) throw up.error
 
-    const { data:pub } = supabase.storage.from(BUCKET).getPublicUrl(path)
+    const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path)
     const image_url = pub.publicUrl
 
     const row = {
       session_id: SESSION_ID,
       client_ip: ip,
       image_url,
-      position:   stickerMesh.position.toArray(),
+      position: stickerMesh.position.toArray(),
       quaternion: stickerMesh.quaternion.toArray(),
-      scale:      stickerScale,
-      rotz:       stickerRotZ,
-      axis:       lastWallNormal ? lastWallNormal.toArray() : [0,0,1]
+      scale: stickerScale,
+      rotz: stickerRotZ,
+      axis: lastWallNormal ? lastWallNormal.toArray() : [0, 0, 1]
     }
 
     const ins = await supabase.from(TABLE).insert(row)
@@ -381,7 +379,7 @@ async function publishSticker(){
 
     status('✅ Published')
     await updatePublishLabel()
-  }catch(e){
+  } catch (e) {
     console.error(e)
     const m = String(e?.message || e)
     if (m.includes('violates row-level security') || m.includes('quota_ok'))
@@ -389,31 +387,31 @@ async function publishSticker(){
     else
       status('❌ Publish error')
     cooldownPublish()
-  }finally{
+  } finally {
     lockPublish(true)
   }
 }
 
 // ===========================================================
 // LIVE
-async function bootstrapLive(){
-  const { data, error } = await supabase.from(TABLE).select('*').order('created_at',{ascending:true}).limit(500)
+async function bootstrapLive() {
+  const { data, error } = await supabase.from(TABLE).select('*').order('created_at', { ascending: true }).limit(500)
   if (!error) data?.forEach(addLiveFromRow)
   supabase
     .channel('stickers-live')
-    .on('postgres_changes',{ event:'INSERT', schema:'public', table:TABLE }, payload=>{
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLE }, payload => {
       addLiveFromRow(payload.new)
       if (payload.new?.session_id === SESSION_ID) updatePublishLabel()
     })
     .subscribe()
 }
 
-function addLiveFromRow(row){
+function addLiveFromRow(row) {
   if (!row?.id || liveStickers.has(row.id)) return
-  loadTex(row.image_url, (tex)=>{
-    const g = new THREE.PlaneGeometry(1,1)
+  loadTex(row.image_url, (tex) => {
+    const g = new THREE.PlaneGeometry(1, 1)
     const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true })
-    const mesh = new THREE.Mesh(g,m)
+    const mesh = new THREE.Mesh(g, m)
     mesh.position.fromArray(row.position)
     mesh.quaternion.fromArray(row.quaternion)
     const sc = row.scale ?? 0.35
@@ -441,6 +439,130 @@ async function deleteAllStickers() {
 
 // ===========================================================
 // ADMIN BAR (Shift + A)
-let adminOpen=false, adminUnlocked=false
-function installAdminHotkey(){
-  window.addEventListener('keydown
+let adminOpen = false, adminUnlocked = false
+
+function installAdminHotkey() {
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'a' && e.shiftKey) {
+      adminOpen ? lockAdminBar(false) : openAdminBar()
+    }
+  })
+}
+
+function openAdminBar() {
+  adminOpen = true
+  adminBar.style.display = 'block'
+  if (adminUnlocked) unlockAdminBar()
+  else lockAdminBar(false)
+}
+
+function lockAdminBar(hide = false) {
+  adminUnlocked = false
+  adminTitle.textContent = 'Admin'
+  adminLockedRow.style.display = 'flex'
+  adminUnlockedRow.style.display = 'none'
+  if (hide) {
+    adminOpen = false
+    adminBar.style.display = 'none'
+  }
+}
+
+function unlockAdminBar() {
+  adminUnlocked = true
+  adminTitle.textContent = 'Admin connected'
+  adminLockedRow.style.display = 'none'
+  adminUnlockedRow.style.display = 'flex'
+}
+
+// ===========================================================
+// UI helpers
+function status(msg) {
+  if (!statusEl) return
+  statusEl.textContent = msg
+  statusEl.style.opacity = 1
+  clearTimeout(status._t)
+  status._t = setTimeout(() => (statusEl.style.opacity = 0), 3500)
+}
+
+function lockPublish(enabled) {
+  if (!publishBtn) return
+  publishBtn.disabled = !enabled
+  publishBtn.style.opacity = enabled ? 1 : 0.5
+  publishBtn.style.cursor = enabled ? 'pointer' : 'not-allowed'
+}
+
+function cooldownPublish(ms = 1200) {
+  if (!publishBtn) return
+  publishBtn.disabled = true
+  publishBtn.style.opacity = 0.5
+  setTimeout(() => updatePublishLabel(), ms)
+}
+
+function loadTex(url, onLoad) {
+  if (textureCache.has(url)) return onLoad(textureCache.get(url))
+  new THREE.TextureLoader().load(url, (t) => {
+    t.colorSpace = THREE.SRGBColorSpace
+    t.anisotropy = 8
+    textureCache.set(url, t)
+    onLoad(t)
+  })
+}
+
+// ===========================================================
+// QUOTA LABEL (2/24h)
+async function getTodayCount() {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+  if (CLIENT_IP) {
+    const res = await supabase
+      .from(TABLE)
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', since)
+      .eq('client_ip', CLIENT_IP)
+    if (!res.error && typeof res.count === 'number') return res.count
+  }
+
+  const res2 = await supabase
+    .from(TABLE)
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', since)
+    .eq('session_id', SESSION_ID)
+
+  return res2?.count ?? 0
+}
+
+async function updatePublishLabel() {
+  try {
+    if (!CLIENT_IP) { try { await fetchClientIp() } catch {} }
+
+    const c = await getTodayCount()
+    if (!publishBtn) return
+
+    if (c >= 2) {
+      publishBtn.textContent = 'Blocked'
+      publishBtn.disabled = true
+      publishBtn.style.opacity = 0.5
+      publishBtn.style.cursor = 'not-allowed'
+    } else {
+      publishBtn.textContent = `Publish ${c}/2`
+      publishBtn.disabled = false
+      publishBtn.style.opacity = 1
+      publishBtn.style.cursor = 'pointer'
+    }
+  } catch {
+    if (publishBtn) {
+      publishBtn.textContent = 'Publish'
+      publishBtn.disabled = false
+      publishBtn.style.opacity = 1
+      publishBtn.style.cursor = 'pointer'
+    }
+  }
+}
+
+// ===========================================================
+// RENDER
+function animate() {
+  requestAnimationFrame(animate)
+  controls?.update()
+  renderer?.render(scene, camera)
+}
