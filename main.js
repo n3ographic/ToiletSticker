@@ -4,7 +4,6 @@ import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/cont
 import { GLTFLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'https://unpkg.com/three@0.160.0/examples/jsm/libs/meshopt_decoder.module.js';
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
 // ---------- ENV ----------
