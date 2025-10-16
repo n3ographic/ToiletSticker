@@ -17,13 +17,6 @@ const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || ''
 const BUCKET = 'stickers'
 const TABLE  = 'stickers'
 
-// Sanity log (évite 401 silencieux si env manquantes)
-console.log('[ENV]', {
-  url: SUPABASE_URL,
-  hasAnon: !!SUPABASE_ANON,
-  anonPrefix: SUPABASE_ANON?.slice(0, 12) + '…'
-})
-
 // Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
 
@@ -60,6 +53,9 @@ let stickerTexture = null, stickerMesh = null
 let stickerScale = parseFloat(sizeRange?.value ?? '0.35')
 let stickerRotZ  = 0
 let baseQuat = new THREE.Quaternion()
+
+// ✅ nouveau : garde l’axe du mur pour la colonne `axis`
+let lastWallNormal = new THREE.Vector3(0, 0, 1)
 
 const LS_KEY = 'toilet-sticker-save'
 const liveStickers = new Map()
@@ -249,6 +245,10 @@ function tryPlaceStickerFromPointer(ev){
 
   const EPS=0.006
   const p = hit.point.clone().add(n.clone().multiplyScalar(EPS))
+
+  // ✅ on mémorise l’axe du mur pour la colonne `axis`
+  lastWallNormal.copy(n)
+
   placeOrMoveSticker(p, n)
   saveSticker()
 }
@@ -308,7 +308,9 @@ function saveSticker(){
     quaternion: stickerMesh.quaternion.toArray(),
     baseQuat:   baseQuat.toArray(),
     scale:      stickerScale,
-    rotZ:       stickerRotZ
+    rotZ:       stickerRotZ,
+    // ✅ stocke aussi l’axe
+    axis:       lastWallNormal?.toArray?.() || [0,0,1]
   }
   localStorage.setItem(LS_KEY, JSON.stringify(d))
 }
@@ -324,11 +326,12 @@ function loadSticker(texture){
     stickerMesh.scale.set(stickerScale, stickerScale, 1)
     if(d.baseQuat){ baseQuat.fromArray(d.baseQuat); applyStickerRotation() }
     else{
-      // ✅ FIX: pas d’espace — Quaternion
       const qF = new THREE.Quaternion().fromArray(d.quaternion)
       const qR = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), stickerRotZ)
       baseQuat.copy(qF).multiply(qR.invert()); applyStickerRotation()
     }
+    // ✅ restore axis si dispo
+    if (d.axis) lastWallNormal.fromArray(d.axis)
     scene.add(stickerMesh)
   }catch(e){ console.warn('Load sticker error', e) }
 }
@@ -370,7 +373,9 @@ async function publishSticker(){
       position:   stickerMesh.position.toArray(),
       quaternion: stickerMesh.quaternion.toArray(),
       scale:      stickerScale,
-      rotz:       stickerRotZ
+      rotz:       stickerRotZ,
+      // ✅ envoi de la colonne `axis`
+      axis:       lastWallNormal ? lastWallNormal.toArray() : [0,0,1]
     }
 
     const ins = await supabase.from(TABLE).insert(row)
