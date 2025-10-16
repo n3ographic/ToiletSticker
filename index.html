@@ -1,70 +1,42 @@
 <!doctype html>
 <html lang="fr">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Toilet Sticker</title>
-  <link rel="stylesheet" href="/style.css" />
-  <!-- Open Graph -->
-<meta property="og:title" content="Toilet Sticker" />
-<meta property="og:description" content="Colle ton sticker dans les toilettes virtuelles 🚽" />
-<meta property="og:image" content="https://toilet-sticker.vercel.app/og-image.png" />
-<meta property="og:url" content="https://toilet-sticker.vercel.app/" />
-<meta property="og:type" content="website" />
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Toilet Sticker – Stable</title>
 
-<!-- Pour Twitter (optionnel mais recommandé) -->
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Toilet Sticker" />
-<meta name="twitter:description" content="Stick your sticker in the virtual toilet" />
-<meta name="twitter:image" content="https://toilet-sticker.vercel.app/og-image.png" />
-</head>
-<body>
-    <!-- Toolbar -->
-    <div class="ui-top">
-      <label class="btn">
-        <input id="file" type="file" accept="image/*" hidden />
-        Choose a file
-      </label>
+    <!-- Open Graph (tu peux changer le chemin) -->
+    <meta property="og:title" content="Toilet Sticker" />
+    <meta property="og:description" content="Pose ton sticker dans les toilettes !" />
+    <meta property="og:image" content="/public/og-image.png" />
+    <meta property="og:type" content="website" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="toolbar">
+        <label class="file">
+          <input id="fileInput" type="file" accept="image/*" />
+          <span>Choose a file</span>
+        </label>
 
-      <div class="sep"></div>
+        <div class="ctrl">
+          <span>Size</span>
+          <input id="size" type="range" min="0.2" max="1.6" step="0.01" value="0.5" />
+        </div>
 
-      <div class="group">
-        <span>Size</span>
-        <input id="size" type="range" min="0.2" max="1.0" step="0.01" value="0.35" />
+        <div class="ctrl">
+          <span>Rotation</span>
+          <input id="rotz" type="range" min="-180" max="180" step="1" value="0" />
+        </div>
+
+        <button id="removeBtn">Remove</button>
+        <button id="publishBtn">Publish</button>
       </div>
 
-      <div class="group">
-        <span>Rotation</span>
-        <input id="rotation" type="range" min="-180" max="180" step="1" value="0" />
-      </div>
-
-      <div class="sep wide"></div>
-
-      <button id="remove" class="btn">Remove</button>
-      <button id="publish" class="btn primary">Publish</button>
+      <div id="scene-wrap"></div>
     </div>
 
-    <!-- Toast / status -->
-    <div id="status" class="status"></div>
-
-    <!-- Admin modal (Shift + A) -->
-    <form id="adminForm" class="admin-modal" style="display:none">
-      <div class="panel">
-        <div class="title">Admin</div>
-        <input id="adminPassword" type="password" placeholder="Enter password" />
-        <button id="adminEnter" type="submit" class="btn primary">Enter</button>
-      </div>
-    </form>
-
-    <!-- Admin bar -->
-    <div id="adminBar" class="admin-bar" style="display:none">
-      <span>Admin connected</span>
-      <div class="spacer"></div>
-      <button id="adminClose" class="btn">Close</button>
-      <button id="adminClean" class="btn danger">Clean all</button>
-    </div>
-
-    <canvas id="c"></canvas>
     <script type="module" src="/main.js"></script>
   </body>
 </html>
