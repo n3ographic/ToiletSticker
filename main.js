@@ -426,6 +426,7 @@ if (adminCleanAllBtn) adminCleanAllBtn.addEventListener('click', deleteAllSticke
 
 // ===========================================================
 // UTILS
+
 function status(msg) {
   if (!statusEl) return
   statusEl.textContent = msg
@@ -436,4 +437,88 @@ function status(msg) {
 
 function lockPublish(enabled) {
   if (!publishBtn) return
-  publish
+  publishBtn.disabled = !enabled
+  publishBtn.style.opacity = enabled ? 1 : 0.5
+  publishBtn.style.cursor = enabled ? 'pointer' : 'not-allowed'
+}
+
+function cooldownPublish(ms = 1200) {
+  if (!publishBtn) return
+  publishBtn.disabled = true
+  publishBtn.style.opacity = 0.5
+  setTimeout(() => updatePublishLabel(), ms)
+}
+
+function loadTex(url, onLoad) {
+  if (textureCache.has(url)) return onLoad(textureCache.get(url))
+  new THREE.TextureLoader().load(url, (t) => {
+    t.colorSpace = THREE.SRGBColorSpace
+    t.anisotropy = 8
+    textureCache.set(url, t)
+    onLoad(t)
+  })
+}
+
+// ===========================================================
+// QUOTA (2 stickers / 24h)
+
+async function getTodayCount() {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+  // Priorité IP (cohérent avec RLS)
+  if (CLIENT_IP) {
+    const res = await supabase
+      .from(TABLE)
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', since)
+      .eq('client_ip', CLIENT_IP)
+    if (!res.error && typeof res.count === 'number') return res.count
+  }
+
+  // Fallback par session si IP indispo
+  const res2 = await supabase
+    .from(TABLE)
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', since)
+    .eq('session_id', SESSION_ID)
+
+  return res2?.count ?? 0
+}
+
+async function updatePublishLabel() {
+  try {
+    if (!CLIENT_IP) { try { await fetchClientIp() } catch {} }
+
+    const c = await getTodayCount()
+    if (!publishBtn) return
+
+    if (c >= 2) {
+      publishBtn.textContent = 'Blocked'
+      publishBtn.disabled = true
+      publishBtn.style.opacity = 0.5
+      publishBtn.style.cursor = 'not-allowed'
+    } else {
+      publishBtn.textContent = `Publish ${c}/2`
+      publishBtn.disabled = false
+      publishBtn.style.opacity = 1
+      publishBtn.style.cursor = 'pointer'
+    }
+  } catch {
+    if (publishBtn) {
+      publishBtn.textContent = 'Publish'
+      publishBtn.disabled = false
+      publishBtn.style.opacity = 1
+      publishBtn.style.cursor = 'pointer'
+    }
+  }
+}
+
+// ===========================================================
+// RENDER LOOP
+
+function animate() {
+  requestAnimationFrame(animate)
+  controls?.update()
+  renderer?.render(scene, camera)
+}
+
