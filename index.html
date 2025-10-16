@@ -2,50 +2,19 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Toilet Sticker</title>
-    <link rel="stylesheet" href="/style.css" />
-    <!-- Open Graph -->
-    <meta property="og:title" content="Toilet Sticker" />
-    <meta property="og:description" content="Colle ton sticker dans les WC du bar." />
-    <meta property="og:image" content="/public/og.png" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Three CDN test</title>
+    <style>
+      html,body { margin:0; height:100%; background:#000; }
+      #app { position:fixed; inset:0; }
+      .ui { position:fixed; left:12px; top:12px; color:#fff; font:14px/1.2 ui-sans-serif, system-ui; }
+    </style>
   </head>
   <body>
-    <div id="ui" class="ui">
-      <label class="btn">
-        <input id="file" type="file" accept="image/*" hidden />
-        Choose a file
-      </label>
+    <div id="app"></div>
+    <div class="ui">CDN test…</div>
 
-      <label>Size
-        <input id="size" type="range" min="0.2" max="2.0" value="1" step="0.01" />
-      </label>
-
-      <label>Rotation
-        <input id="rot" type="range" min="-180" max="180" value="0" step="1" />
-      </label>
-
-      <button id="remove" class="btn">Remove</button>
-      <button id="publish" class="btn btn-primary">Publish 0/2</button>
-    </div>
-
-    <div id="toast" class="toast"></div>
-
-    <!-- Admin modal (touche ‘A’ pour ouvrir) -->
-    <dialog id="adminDialog" class="admin">
-      <form method="dialog">
-        <h3>Admin</h3>
-        <input id="adminPassword" type="password" placeholder="Enter password" autocomplete="off" />
-        <div class="row">
-          <button id="adminClose" value="close" class="btn">Close</button>
-          <button id="adminPurge" class="btn btn-danger">Clean all</button>
-        </div>
-      </form>
-    </dialog>
-
-    <canvas id="c"></canvas>
-
-    <!-- Three + loaders (modules ESM) -->
-    <script type="module" src="/main.js"></script>
+    <!-- IMPORTANT: type="module" et chemin relatif vers TON main.js -->
+    <script type="module" src="./main.js?v=cdn-test-1"></script>
   </body>
 </html>
