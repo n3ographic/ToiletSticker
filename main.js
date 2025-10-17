@@ -667,6 +667,61 @@ function cooldownPublish() {
 }
 
 // ===========================================================
+// 🔊 AMBIENT SOUND (loop + mute toggle)
+let audio, audioCtx;
+const audioToggle = document.getElementById('audioToggle');
+const LS_AUDIO_KEY = 'toilet-audio-muted';
+
+// Charger le son dès que la scène est prête
+function initAmbientSound() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audio = new Audio('/ambient.mp3'); // <- mets ton son ici
+  audio.loop = true;
+  audio.volume = 0.25;
+  const track = audioCtx.createMediaElementSource(audio);
+  track.connect(audioCtx.destination);
+
+  const muted = localStorage.getItem(LS_AUDIO_KEY) === 'true';
+  if (!muted) {
+    audio.play().catch(() => {});
+  }
+  updateAudioIcon(muted);
+}
+
+// Basculer mute / unmute
+function toggleAudio() {
+  const muted = localStorage.getItem(LS_AUDIO_KEY) === 'true';
+  const newMuted = !muted;
+  localStorage.setItem(LS_AUDIO_KEY, String(newMuted));
+  updateAudioIcon(newMuted);
+
+  if (newMuted) {
+    audio.pause();
+  } else {
+    audio.play().catch(() => {});
+  }
+}
+
+// Met à jour l'icône du bouton
+function updateAudioIcon(muted) {
+  if (!audioToggle) return;
+  audioToggle.textContent = muted ? '🔇' : '🔊';
+}
+
+// Événement bouton
+if (audioToggle) {
+  audioToggle.addEventListener('click', toggleAudio);
+}
+
+// Lancer après init
+window.addEventListener('DOMContentLoaded', () => {
+  // Certains navigateurs bloquent l’autoplay → le démarrage au premier clic
+  setTimeout(() => {
+    initAmbientSound();
+  }, 1500);
+});
+
+// ===========================================================
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
