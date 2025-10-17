@@ -19,8 +19,9 @@ html, body {
 /* ---- UI ---- */
 #ui {
   position: fixed;
-  top: 8px;
-  left: 8px;
+  top: 0px;
+  left: 0px;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -37,7 +38,7 @@ html, body {
 }
 
 #ui input[type='range'] {
-  accent-color: #0099ff;
+  accent-color: #fff;
 }
 
 #ui button {
