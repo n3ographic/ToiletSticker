@@ -23,7 +23,7 @@ html, body {
   left: 0px;
   width: 100%;
   display: flex;
-  justify-content: space-between;
+  justify-content: start;
   align-items: center;
   gap: 8px;
   background: rgba(0, 0, 0, 0.6);
