@@ -27,7 +27,7 @@ html, body {
   gap: 8px;
   background: rgba(0, 0, 0, 0.6);
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: 0px;
   z-index: 10;
   backdrop-filter: blur(4px);
 }
