@@ -675,7 +675,7 @@ const LS_AUDIO_KEY = 'toilet-audio-muted';
 // Charger le son dès que la scène est prête
 function initAmbientSound() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  audio = new Audio('/ambient.mp3'); // <- mets ton son ici
+  audio = new Audio('/public/ambient.mp3'); // <- mets ton son ici
   audio.loop = true;
   audio.volume = 0.25;
   const track = audioCtx.createMediaElementSource(audio);
