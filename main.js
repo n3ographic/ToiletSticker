@@ -667,29 +667,34 @@ function cooldownPublish() {
 }
 
 // ===========================================================
-// 🔊 Ambient sound with reliable unlock (autoplay-safe)
+// 🔊 Ambient sound (default = unmuted)
 let ambientAudio;
 const audioToggle = document.getElementById('audioToggle');
 const LS_AUDIO_KEY = 'toilet-audio-muted';
 const AUDIO_SRC = `${import.meta.env.BASE_URL || '/'}ambient.mp3`;
 
-// user's desired mute state (persisted)
-let desiredMuted = (localStorage.getItem(LS_AUDIO_KEY) ?? 'true') === 'true';
+// lire la préférence précédente
+let desiredMuted = (localStorage.getItem(LS_AUDIO_KEY) ?? 'false') === 'true';
 
 function updateAudioIcon(muted) {
-  if (!audioToggle) return;
-  audioToggle.textContent = muted ? '🔇' : '🔊';
+  if (audioToggle) audioToggle.textContent = muted ? '🔇' : '🔊';
 }
 
-function addUnlockers(handler) {
-  window.addEventListener('pointerdown', handler, { once: true });
-  window.addEventListener('keydown', handler, { once: true });
-  window.addEventListener('touchstart', handler, { once: true, passive: true });
-}
-function removeUnlockers(handler) {
-  window.removeEventListener('pointerdown', handler);
-  window.removeEventListener('keydown', handler);
-  window.removeEventListener('touchstart', handler);
+function tryPlayAudio() {
+  if (!ambientAudio) return;
+  ambientAudio.play().catch(() => {
+    // si bloqué → on écoute le premier clic pour débloquer
+    const unlock = () => {
+      ambientAudio.play().finally(() => {
+        window.removeEventListener('pointerdown', unlock);
+        window.removeEventListener('keydown', unlock);
+        window.removeEventListener('touchstart', unlock);
+      });
+    };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    window.addEventListener('touchstart', unlock, { once: true, passive: true });
+  });
 }
 
 function initAmbient() {
@@ -697,54 +702,31 @@ function initAmbient() {
   ambientAudio.loop = true;
   ambientAudio.preload = 'auto';
   ambientAudio.volume = 0.25;
-
-  // 1) Start muted so autoplay is allowed
-  ambientAudio.muted = true;
+  ambientAudio.muted = desiredMuted; // ← par défaut : false = UNMUTED
   updateAudioIcon(desiredMuted);
 
-  // Try to kick it off muted; ignore failures
-  ambientAudio.play().catch(() => {});
+  tryPlayAudio();
 
-  // 2) On first user gesture, apply the user's desired state
-  const unlock = () => {
-    // apply persisted choice
-    ambientAudio.muted = desiredMuted;
-    updateAudioIcon(desiredMuted);
-
-    // if sound should be audible, ensure it's actively playing
-    if (!desiredMuted) {
-      ambientAudio.currentTime = 0; // makes sure it starts right away on iOS
-      ambientAudio.play().catch(() => {});
-    }
-    removeUnlockers(unlock);
-  };
-  addUnlockers(unlock);
-
-  // 3) If the tab becomes visible again, keep the loop alive
+  // garde la lecture quand on revient sur l’onglet
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && ambientAudio && !ambientAudio.muted) {
-      ambientAudio.play().catch(() => {});
+      tryPlayAudio();
     }
   });
 }
 
+// bouton 🔊 / 🔇
 if (audioToggle) {
   audioToggle.addEventListener('click', () => {
     if (!ambientAudio) return;
-    desiredMuted = !desiredMuted;
-    localStorage.setItem(LS_AUDIO_KEY, String(desiredMuted));
-    ambientAudio.muted = desiredMuted;
-    updateAudioIcon(desiredMuted);
-
-    if (!desiredMuted) {
-      // ensure audible playback after unmute
-      ambientAudio.currentTime = Math.max(0, ambientAudio.currentTime || 0);
-      ambientAudio.play().catch(() => {});
-    }
+    desiredMuted = !ambientAudio.muted;
+    ambientAudio.muted = !ambientAudio.muted;
+    localStorage.setItem(LS_AUDIO_KEY, String(ambientAudio.muted));
+    updateAudioIcon(ambientAudio.muted);
+    if (!ambientAudio.muted) tryPlayAudio();
   });
 }
 
-// Run after DOM ready so #audioToggle exists
 window.addEventListener('DOMContentLoaded', initAmbient);
 
 
