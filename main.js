@@ -1,15 +1,15 @@
-// main.js — Toilet Sticker (Three.js + Supabase)
-// Orbit 360°, collage au click simple, ratio image respecté,
-// Publish limité 2/24h (RLS), live realtime, Admin bar (Shift+A) clean all.
+// main.js — Toilet Sticker (Three.js + Supabase + Lighting + Ambient Sound)
 
+// ========== Imports ==========
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import { createClient } from '@supabase/supabase-js';
 
-// ---------------- CONFIG ----------------
+// ========== Config ==========
 const MODEL_URL = '/toilet.glb';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON;
@@ -17,17 +17,14 @@ const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || '';
 const BUCKET = 'stickers';
 const TABLE = 'stickers';
 
-// Supabase
+// Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
-// ---------------- SESSION / DOM ----------------
+// ========== Session & DOM ==========
 function getOrCreateSessionId() {
   const k = 'TOILET_SESSION_ID';
   let id = localStorage.getItem(k);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(k, id);
-  }
+  if (!id) { id = crypto.randomUUID(); localStorage.setItem(k, id); }
   return id;
 }
 const SESSION_ID = getOrCreateSessionId();
@@ -40,7 +37,7 @@ const rotRange = document.getElementById('rotRange');
 const removeBtn = document.getElementById('removeBtn');
 const publishBtn = document.getElementById('publishBtn');
 
-// Admin footer bar (Shift + A)
+// Admin bar
 const adminBar = document.getElementById('adminBar');
 const adminTitle = document.getElementById('adminTitle');
 const adminPassInput = document.getElementById('adminPassword');
@@ -50,15 +47,16 @@ const adminUnlockedRow = document.getElementById('adminUnlocked');
 const adminCloseBtn = document.getElementById('adminClose');
 const adminCleanAllBtn = document.getElementById('adminCleanAll');
 
-// ---------------- Three.js ----------------
+// Audio toggle (texte)
+const audioToggle = document.getElementById('audioToggle');
+
+// ========== Three.js Core ==========
 let scene, camera, renderer, controls, modelRoot;
 let stickerTexture = null;
 let stickerMesh = null;
 let stickerScale = parseFloat(sizeRange?.value ?? '0.35');
 let stickerRotZ = 0;
 let baseQuat = new THREE.Quaternion();
-
-// garde l’axe du mur pour la colonne `axis`
 let lastWallNormal = new THREE.Vector3(0, 0, 1);
 
 const LS_KEY = 'toilet-sticker-save';
@@ -71,33 +69,24 @@ function fetchClientIp() {
   if (CLIENT_IP) return Promise.resolve(CLIENT_IP);
   if (fetchIpPromise) return fetchIpPromise;
   fetchIpPromise = fetch('https://api.ipify.org?format=json')
-    .then((r) => (r.ok ? r.json() : Promise.reject()))
-    .then((j) => {
-      CLIENT_IP = j.ip || null;
-      return CLIENT_IP;
-    })
-    .catch(() => {
-      CLIENT_IP = null;
-      return CLIENT_IP;
-    });
+    .then(r => (r.ok ? r.json() : Promise.reject()))
+    .then(j => (CLIENT_IP = j.ip || null))
+    .catch(() => (CLIENT_IP = null));
   return fetchIpPromise;
 }
 
-// ---------------- Boot ----------------
+// ========== Boot ==========
 init();
 animate();
-bootstrapLive()
-  .then(updatePublishLabel)
-  .catch(console.warn);
+bootstrapLive().then(updatePublishLabel).catch(console.warn);
 fetchClientIp();
 
-// ===========================================================
+// ========== Init ==========
 function init() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
 
-  const w = innerWidth;
-  const h = innerHeight;
+  const w = innerWidth, h = innerHeight;
   camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 150);
   camera.position.set(0, 1.55, 2.6);
 
@@ -109,13 +98,9 @@ function init() {
   renderer.shadowMap.enabled = true;
   container.appendChild(renderer.domElement);
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.9);
-  hemi.position.set(0, 4, 0);
+  // Light de base (sera remplacée/boostée)
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.75);
   scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.3);
-  dir.position.set(3.5, 6, 2.2);
-  dir.castShadow = true;
-  scene.add(dir);
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableZoom = false;
@@ -133,7 +118,7 @@ function init() {
   installAdminHotkey();
   installClickToPlace();
 
-  loadModel();
+  loadModel(); // async (no top-level await)
 
   window.addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
@@ -142,7 +127,8 @@ function init() {
   });
 }
 
-function loadModel() {
+// ========== Model ==========
+async function loadModel() {
   status('Loading 3D…');
   const loader = new GLTFLoader();
   const draco = new DRACOLoader();
@@ -152,23 +138,19 @@ function loadModel() {
 
   loader.load(
     MODEL_URL,
-    (gltf) => {
+    async (gltf) => {
       modelRoot = gltf.scene;
-      modelRoot.traverse((o) => {
-        if (o.isMesh) {
-          o.castShadow = true;
-          o.receiveShadow = true;
-        }
-      });
+      modelRoot.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       scene.add(modelRoot);
+
+      // 💡 Boost lumière après ajout du modèle
+      await boostLightingPreset();
+
       centerOrbit(modelRoot);
       status('✅ Ready — pick a file, click a wall, then Publish');
     },
     undefined,
-    (e) => {
-      console.error(e);
-      status('❌ Model load error');
-    }
+    (e) => { console.error(e); status('❌ Model load error'); }
   );
 }
 
@@ -181,7 +163,6 @@ function centerOrbit(root, eyeH = 1.2) {
 
   controls.target.set(c.x, floor + eyeH, c.z);
   camera.position.set(c.x, floor + eyeH + 0.4, c.z + r);
-
   controls.minDistance = r * 0.9;
   controls.maxDistance = r * 0.9;
   controls.update();
@@ -194,7 +175,7 @@ function findFloorY(root, c, box) {
   return hits.length ? hits[0].point.y : box.min.y;
 }
 
-// ===========================================================
+// ========== UI Events ==========
 function addUIEvents() {
   if (fileInput) {
     fileInput.addEventListener('change', (e) => {
@@ -214,61 +195,44 @@ function addUIEvents() {
   if (sizeRange) {
     sizeRange.addEventListener('input', () => {
       stickerScale = parseFloat(sizeRange.value);
-      if (stickerMesh) {
-        stickerMesh.scale.set(stickerScale, stickerScale, 1);
-        saveSticker();
-      }
+      if (stickerMesh) { stickerMesh.scale.set(stickerScale, stickerScale, 1); saveSticker(); }
     });
   }
 
   if (rotRange) {
     rotRange.addEventListener('input', () => {
       stickerRotZ = (parseFloat(rotRange.value) * Math.PI) / 180;
-      if (stickerMesh) {
-        applyStickerRotation();
-        saveSticker();
-      }
+      if (stickerMesh) { applyStickerRotation(); saveSticker(); }
     });
   }
 
   if (removeBtn) removeBtn.addEventListener('click', removeLocalSticker);
   if (publishBtn) publishBtn.addEventListener('click', publishSticker);
 
-  // Admin bar actions
+  // Admin
   if (adminEnterBtn) {
     adminEnterBtn.addEventListener('click', () => {
       const v = adminPassInput.value || '';
-      if (v === ADMIN_PASSWORD && ADMIN_PASSWORD !== '') {
-        unlockAdminBar();
-      } else {
-        alert('Wrong password');
-      }
+      if (v === ADMIN_PASSWORD && ADMIN_PASSWORD !== '') { unlockAdminBar(); }
+      else { alert('Wrong password'); }
     });
   }
   if (adminCloseBtn) adminCloseBtn.addEventListener('click', () => lockAdminBar(true));
   if (adminCleanAllBtn) adminCleanAllBtn.addEventListener('click', deleteAllStickers);
 }
 
-// ---------------- Collage au click simple robuste ----------------
+// Click vs drag
 function installClickToPlace() {
   let movedSinceDown = false;
-
-  renderer.domElement.addEventListener('pointerdown', () => {
-    movedSinceDown = false;
-  });
-
-  controls.addEventListener('change', () => {
-    movedSinceDown = true;
-  });
-
+  renderer.domElement.addEventListener('pointerdown', () => { movedSinceDown = false; });
+  controls.addEventListener('change', () => { movedSinceDown = true; });
   renderer.domElement.addEventListener('click', (e) => {
-    if (movedSinceDown) return; // drag → ignore
-    tryPlaceStickerFromPointer(e); // click simple → colle
+    if (movedSinceDown) return;
+    tryPlaceStickerFromPointer(e);
   });
 }
 
-// ===========================================================
-// PLACE
+// ========== Placement Sticker ==========
 function tryPlaceStickerFromPointer(ev) {
   if (!stickerTexture || !modelRoot) return;
 
@@ -290,16 +254,11 @@ function tryPlaceStickerFromPointer(ev) {
     hit.object.updateMatrixWorld();
     n.transformDirection(hit.object.matrixWorld).normalize();
   }
-  if (Math.abs(n.y) > 0.6) {
-    status('⛔ Place on a wall');
-    return;
-  }
+  if (Math.abs(n.y) > 0.6) { status('⛔ Place on a wall'); return; }
   n = snappedWallNormal(n);
 
   const EPS = 0.006;
   const p = hit.point.clone().add(n.clone().multiplyScalar(EPS));
-
-  // mémorise l’axe du mur pour la colonne `axis`
   lastWallNormal.copy(n);
 
   placeOrMoveSticker(p, n);
@@ -307,8 +266,7 @@ function tryPlaceStickerFromPointer(ev) {
 }
 
 function snappedWallNormal(n) {
-  const v = n.clone();
-  v.y = 0;
+  const v = n.clone(); v.y = 0;
   if (v.lengthSq() < 1e-6) return new THREE.Vector3(0, 0, 1);
   v.normalize();
   return Math.abs(v.x) > Math.abs(v.z)
@@ -375,25 +333,18 @@ function loadSticker(texture) {
     const d = JSON.parse(raw);
     stickerMesh = createStickerMeshFromTexture(texture);
     stickerMesh.position.fromArray(d.position);
-    stickerScale = d.scale ?? 0.35;
-    if (sizeRange) sizeRange.value = String(stickerScale);
-    stickerRotZ = d.rotZ ?? 0;
-    if (rotRange) rotRange.value = String((stickerRotZ * 180) / Math.PI);
+    stickerScale = d.scale ?? 0.35; if (sizeRange) sizeRange.value = String(stickerScale);
+    stickerRotZ = d.rotZ ?? 0; if (rotRange) rotRange.value = String((stickerRotZ * 180) / Math.PI);
     stickerMesh.scale.set(stickerScale, stickerScale, 1);
-    if (d.baseQuat) {
-      baseQuat.fromArray(d.baseQuat);
-      applyStickerRotation();
-    } else {
+    if (d.baseQuat) { baseQuat.fromArray(d.baseQuat); applyStickerRotation(); }
+    else {
       const qF = new THREE.Quaternion().fromArray(d.quaternion);
       const qR = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), stickerRotZ);
-      baseQuat.copy(qF).multiply(qR.invert());
-      applyStickerRotation();
+      baseQuat.copy(qF).multiply(qR.invert()); applyStickerRotation();
     }
     if (d.axis) lastWallNormal.fromArray(d.axis);
     scene.add(stickerMesh);
-  } catch (e) {
-    console.warn('Load sticker error', e);
-  }
+  } catch (e) { console.warn('Load sticker error', e); }
 }
 
 function removeLocalSticker() {
@@ -407,13 +358,9 @@ function removeLocalSticker() {
   status('Sticker removed (local)');
 }
 
-// ===========================================================
-// PUBLISH (limité par RLS 2/24h)
+// ========== Publish ==========
 async function publishSticker() {
-  if (!stickerMesh || !fileInput?.files?.[0]) {
-    status('⚠️ Pick a file and place it first');
-    return;
-  }
+  if (!stickerMesh || !fileInput?.files?.[0]) { status('⚠️ Pick a file and place it first'); return; }
   try {
     lockPublish(false);
     status('Uploading…');
@@ -423,10 +370,7 @@ async function publishSticker() {
     const ext = (file.name.split('.').pop() || 'png').toLowerCase();
     const path = `users/${SESSION_ID}/${Date.now()}.${ext}`;
 
-    const up = await supabase.storage.from(BUCKET).upload(path, file, {
-      upsert: true,
-      contentType: file.type
-    });
+    const up = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: file.type });
     if (up.error) throw up.error;
 
     const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(path);
@@ -451,33 +395,20 @@ async function publishSticker() {
   } catch (e) {
     console.error(e);
     const m = String(e?.message || e);
-    if (m.includes('violates row-level security') || m.includes('quota_ok')) {
-      status('⛔ Limit reached: 2 stickers / 24h');
-    } else if (m.includes('Bucket')) {
-      status('⛔ Storage policy issue');
-    } else if (m.includes('JWT') || m.includes('Unauthorized')) {
-      status('❌ Auth (check VITE_SUPABASE_URL / VITE_SUPABASE_ANON)');
-    } else {
-      status('❌ Publish error');
-    }
+    if (m.includes('violates row-level security') || m.includes('quota_ok')) status('⛔ Limit reached: 2 stickers / 24h');
+    else if (m.includes('Bucket')) status('⛔ Storage policy issue');
+    else if (m.includes('JWT') || m.includes('Unauthorized')) status('❌ Auth (check VITE_SUPABASE_URL / VITE_SUPABASE_ANON)');
+    else status('❌ Publish error');
     cooldownPublish();
   } finally {
     lockPublish(true);
   }
 }
 
-// ===========================================================
-// LIVE
+// ========== Live ==========
 async function bootstrapLive() {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('*')
-    .order('created_at', { ascending: true })
-    .limit(500);
-
-  if (!error && Array.isArray(data)) {
-    data.forEach(addLiveFromRow);
-  }
+  const { data, error } = await supabase.from(TABLE).select('*').order('created_at', { ascending: true }).limit(500);
+  if (!error && Array.isArray(data)) data.forEach(addLiveFromRow);
 
   supabase
     .channel('stickers-live')
@@ -503,16 +434,13 @@ function addLiveFromRow(row) {
   });
 }
 
-// ===========================================================
-// CLEAN ALL (admin) — DB + Storage récursif
+// ========== Admin Purge ==========
 async function deleteAllStickers() {
   if (!confirm('Delete ALL stickers for everyone?')) return;
   try {
-    // 1) Delete DB
     const del = await supabase.from(TABLE).delete().not('id', 'is', null);
     if (del.error) throw del.error;
 
-    // 2) Purge Storage récursive
     const keys = await listAllStorageKeysRecursive('');
     while (keys.length) {
       const chunk = keys.splice(0, 100);
@@ -520,8 +448,7 @@ async function deleteAllStickers() {
       if (rem.error) throw rem.error;
     }
 
-    // 3) Reset scène
-    liveStickers.forEach((mesh) => scene.remove(mesh));
+    liveStickers.forEach(mesh => scene.remove(mesh));
     liveStickers.clear();
     status('💥 All stickers purged');
   } catch (e) {
@@ -537,21 +464,18 @@ async function listAllStorageKeysRecursive(prefix) {
 
   for (const item of data || []) {
     const full = prefix ? `${prefix}/${item.name}` : item.name;
-    // Dans Supabase Storage SDK v2, les dossiers n’ont pas d’extension, on détecte via metadata
-    if (item && item.name && item.metadata && item.metadata.size >= 0) {
-      // fichier
-      all.push(full);
+    // Heuristique fichier/dossier (SDK v2)
+    if (item && item.metadata && typeof item.metadata.size === 'number') {
+      all.push(full); // fichier
     } else if (item && item.name) {
-      // dossier
-      const sub = await listAllStorageKeysRecursive(full);
+      const sub = await listAllStorageKeysRecursive(full); // dossier
       all.push(...sub);
     }
   }
   return all;
 }
 
-// ===========================================================
-// ADMIN BAR (Shift + A)
+// ========== Admin Bar ==========
 let adminOpen = false;
 let adminUnlocked = false;
 
@@ -563,31 +487,21 @@ function installAdminHotkey() {
 function toggleAdminBar() {
   adminOpen = !adminOpen;
   adminBar.setAttribute('aria-hidden', adminOpen ? 'false' : 'true');
-  if (adminOpen) {
-    if (adminUnlocked) showAdminUnlocked();
-    else showAdminLocked();
-  }
+  if (adminOpen) { if (adminUnlocked) showAdminUnlocked(); else showAdminLocked(); }
 }
 function lockAdminBar(hide = false) {
   adminUnlocked = false;
   adminTitle.textContent = 'Admin';
   adminLockedRow.hidden = false;
   adminUnlockedRow.hidden = true;
-  if (hide) {
-    adminOpen = false;
-    adminBar.setAttribute('aria-hidden', 'true');
-  }
+  if (hide) { adminOpen = false; adminBar.setAttribute('aria-hidden', 'true'); }
 }
-function unlockAdminBar() {
-  adminUnlocked = true;
-  showAdminUnlocked();
-}
+function unlockAdminBar() { adminUnlocked = true; showAdminUnlocked(); }
 function showAdminLocked() {
   adminTitle.textContent = 'Admin';
   adminLockedRow.hidden = false;
   adminUnlockedRow.hidden = true;
-  adminPassInput.value = '';
-  adminPassInput.focus();
+  adminPassInput.value = ''; adminPassInput.focus();
 }
 function showAdminUnlocked() {
   adminTitle.textContent = 'Admin connected';
@@ -595,13 +509,9 @@ function showAdminUnlocked() {
   adminUnlockedRow.hidden = false;
 }
 
-// ===========================================================
-// Helpers
+// ========== Helpers ==========
 function loadTex(url, cb) {
-  if (textureCache.has(url)) {
-    cb(textureCache.get(url));
-    return;
-  }
+  if (textureCache.has(url)) { cb(textureCache.get(url)); return; }
   new THREE.TextureLoader().load(url, (t) => {
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
@@ -609,27 +519,17 @@ function loadTex(url, cb) {
     cb(t);
   });
 }
-function status(txt) {
-  if (statusEl) statusEl.textContent = txt;
-}
+function status(txt) { if (statusEl) statusEl.textContent = txt; }
 
-// Compte le nombre de stickers publiés par cette session sur 24h glissantes
 async function getTodayCount() {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const res = await supabase
-    .from(TABLE)
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', since)
-    .eq('session_id', SESSION_ID);
+  const res = await supabase.from(TABLE).select('id', { count: 'exact', head: true }).gte('created_at', since).eq('session_id', SESSION_ID);
   return res?.count ?? 0;
 }
-
-// Met à jour le label + état du bouton Publish
 async function updatePublishLabel() {
   try {
     const c = await getTodayCount();
     if (!publishBtn) return;
-
     if (c >= 2) {
       publishBtn.textContent = 'Blocked';
       publishBtn.disabled = true;
@@ -641,16 +541,9 @@ async function updatePublishLabel() {
       publishBtn.style.opacity = 1;
       publishBtn.style.cursor = 'pointer';
     }
-  } catch (e) {
-    console.warn('updatePublishLabel error', e);
-  }
+  } catch (e) { console.warn('updatePublishLabel error', e); }
 }
-
-function lockPublish(enabled) {
-  if (publishBtn) publishBtn.disabled = !enabled;
-}
-
-// Petit cooldown lorsqu’un publish échoue
+function lockPublish(enabled) { if (publishBtn) publishBtn.disabled = !enabled; }
 function cooldownPublish() {
   if (!publishBtn) return;
   if (publishBtn.textContent === 'Blocked') return;
@@ -658,29 +551,72 @@ function cooldownPublish() {
   let t = 10;
   const iv = setInterval(() => {
     publishBtn.textContent = `Retry in ${t}s`;
-    if (--t <= 0) {
-      clearInterval(iv);
-      updatePublishLabel();
-      publishBtn.disabled = false;
-    }
+    if (--t <= 0) { clearInterval(iv); updatePublishLabel(); publishBtn.disabled = false; }
   }, 1000);
 }
 
-// ===========================================================
-// 🔊 Ambient sound (default = unmuted) — text button "Mute / Unmute"
+// ========== Lighting Boost Preset ==========
+async function boostLightingPreset() {
+  // Renderer tuning
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.9;
+  renderer.physicallyCorrectLights = true;
+
+  // Remove any previous helpers/lights if needed (optional)
+
+  // 3-point lighting
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x1a1a1a, 0.8);
+  scene.add(hemi);
+
+  const key = new THREE.DirectionalLight(0xffffff, 2.2);
+  key.position.set(3.5, 6, 2.0);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.radius = 2;
+  scene.add(key);
+
+  const fill = new THREE.DirectionalLight(0xffffff, 1.0);
+  fill.position.set(-4.0, 3.0, -1.5);
+  scene.add(fill);
+
+  const rim = new THREE.DirectionalLight(0xffffff, 1.4);
+  rim.position.set(0, 5, -4);
+  scene.add(rim);
+
+  // Optional: Environment map (place /public/env.hdr)
+  // await loadEnvHDR();
+
+  // Boost env reflection on PBR materials
+  if (modelRoot) {
+    modelRoot.traverse(o => {
+      if (o.isMesh && o.material?.isMeshStandardMaterial) {
+        o.material.envMapIntensity = 1.5;
+        o.material.needsUpdate = true;
+      }
+    });
+  }
+}
+
+async function loadEnvHDR() {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const hdr = await new RGBELoader().loadAsync('/env.hdr');
+  const envMap = pmrem.fromEquirectangular(hdr).texture;
+  scene.environment = envMap;
+  // scene.background = envMap; // si tu veux voir le HDR
+  hdr.dispose(); pmrem.dispose();
+}
+
+// ========== Ambient Sound (text button "Mute/Unmute") ==========
 let ambientAudio;
-const audioToggle = document.getElementById('audioToggle');
 const LS_AUDIO_KEY = 'toilet-audio-muted';
 const AUDIO_SRC = `${import.meta.env.BASE_URL || '/'}ambient.mp3`;
-
-// lire la préférence précédente (false = son actif par défaut)
+// Par défaut: unmuted (son actif)
 let desiredMuted = (localStorage.getItem(LS_AUDIO_KEY) ?? 'false') === 'true';
 
 function updateAudioIcon(muted) {
-  if (!audioToggle) return;
-  audioToggle.textContent = muted ? 'Unmute' : 'Mute'; // <-- ici le texte
+  if (audioToggle) audioToggle.textContent = muted ? 'Unmute' : 'Mute';
 }
-
 function tryPlayAudio() {
   if (!ambientAudio) return;
   ambientAudio.play().catch(() => {
@@ -696,24 +632,19 @@ function tryPlayAudio() {
     window.addEventListener('touchstart', unlock, { once: true, passive: true });
   });
 }
-
 function initAmbient() {
   ambientAudio = new Audio(AUDIO_SRC);
   ambientAudio.loop = true;
   ambientAudio.preload = 'auto';
   ambientAudio.volume = 0.25;
-  ambientAudio.muted = desiredMuted;
+  ambientAudio.muted = desiredMuted; // false par défaut => audible
   updateAudioIcon(desiredMuted);
   tryPlayAudio();
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && ambientAudio && !ambientAudio.muted) {
-      tryPlayAudio();
-    }
+    if (!document.hidden && ambientAudio && !ambientAudio.muted) { tryPlayAudio(); }
   });
 }
-
-// bouton texte
 if (audioToggle) {
   audioToggle.addEventListener('click', () => {
     if (!ambientAudio) return;
@@ -723,11 +654,9 @@ if (audioToggle) {
     if (!ambientAudio.muted) tryPlayAudio();
   });
 }
-
 window.addEventListener('DOMContentLoaded', initAmbient);
 
-
-// ===========================================================
+// ========== Animate ==========
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
