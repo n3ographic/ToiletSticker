@@ -667,60 +667,52 @@ function cooldownPublish() {
 }
 
 // ===========================================================
-// 🔊 AMBIENT SOUND (loop + mute toggle)
-let audio, audioCtx;
+// 🔊 Ambient sound (served from /public/ambient.mp3 -> /ambient.mp3)
+let ambientAudio;
 const audioToggle = document.getElementById('audioToggle');
 const LS_AUDIO_KEY = 'toilet-audio-muted';
+const AUDIO_SRC = `${import.meta.env.BASE_URL || '/'}ambient.mp3`;
 
-// Charger le son dès que la scène est prête
-function initAmbientSound() {
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  audio = new Audio('/public/ambient.mp3'); // <- mets ton son ici
-  audio.loop = true;
-  audio.volume = 0.25;
-  const track = audioCtx.createMediaElementSource(audio);
-  track.connect(audioCtx.destination);
-
-  const muted = localStorage.getItem(LS_AUDIO_KEY) === 'true';
-  if (!muted) {
-    audio.play().catch(() => {});
-  }
-  updateAudioIcon(muted);
-}
-
-// Basculer mute / unmute
-function toggleAudio() {
-  const muted = localStorage.getItem(LS_AUDIO_KEY) === 'true';
-  const newMuted = !muted;
-  localStorage.setItem(LS_AUDIO_KEY, String(newMuted));
-  updateAudioIcon(newMuted);
-
-  if (newMuted) {
-    audio.pause();
-  } else {
-    audio.play().catch(() => {});
-  }
-}
-
-// Met à jour l'icône du bouton
 function updateAudioIcon(muted) {
   if (!audioToggle) return;
   audioToggle.textContent = muted ? '🔇' : '🔊';
 }
 
-// Événement bouton
-if (audioToggle) {
-  audioToggle.addEventListener('click', toggleAudio);
+function initAmbient() {
+  ambientAudio = new Audio(AUDIO_SRC);
+  ambientAudio.loop = true;
+  ambientAudio.volume = 0.25;
+
+  const muted = localStorage.getItem(LS_AUDIO_KEY) === 'true';
+  ambientAudio.muted = muted;
+  updateAudioIcon(muted);
+
+  // try autoplay; if blocked, wait for a gesture
+  ambientAudio.play().catch(() => {
+    const unlock = () => {
+      ambientAudio.play().finally(() => {
+        window.removeEventListener('pointerdown', unlock);
+        window.removeEventListener('keydown', unlock);
+        window.removeEventListener('touchstart', unlock);
+      });
+    };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    window.addEventListener('touchstart', unlock, { once: true });
+  });
 }
 
-// Lancer après init
-window.addEventListener('DOMContentLoaded', () => {
-  // Certains navigateurs bloquent l’autoplay → le démarrage au premier clic
-  setTimeout(() => {
-    initAmbientSound();
-  }, 1500);
-});
+if (audioToggle) {
+  audioToggle.addEventListener('click', () => {
+    if (!ambientAudio) return;
+    const newMuted = !ambientAudio.muted;
+    ambientAudio.muted = newMuted;
+    localStorage.setItem(LS_AUDIO_KEY, String(newMuted));
+    updateAudioIcon(newMuted);
+  });
+}
 
+window.addEventListener('DOMContentLoaded', initAmbient);
 // ===========================================================
 function animate() {
   requestAnimationFrame(animate);
