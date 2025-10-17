@@ -667,23 +667,23 @@ function cooldownPublish() {
 }
 
 // ===========================================================
-// 🔊 Ambient sound (default = unmuted)
+// 🔊 Ambient sound (default = unmuted) — text button "Mute / Unmute"
 let ambientAudio;
 const audioToggle = document.getElementById('audioToggle');
 const LS_AUDIO_KEY = 'toilet-audio-muted';
 const AUDIO_SRC = `${import.meta.env.BASE_URL || '/'}ambient.mp3`;
 
-// lire la préférence précédente
+// lire la préférence précédente (false = son actif par défaut)
 let desiredMuted = (localStorage.getItem(LS_AUDIO_KEY) ?? 'false') === 'true';
 
 function updateAudioIcon(muted) {
-  if (audioToggle) audioToggle.textContent = muted ? '🔇' : '🔊';
+  if (!audioToggle) return;
+  audioToggle.textContent = muted ? 'Unmute' : 'Mute'; // <-- ici le texte
 }
 
 function tryPlayAudio() {
   if (!ambientAudio) return;
   ambientAudio.play().catch(() => {
-    // si bloqué → on écoute le premier clic pour débloquer
     const unlock = () => {
       ambientAudio.play().finally(() => {
         window.removeEventListener('pointerdown', unlock);
@@ -702,12 +702,10 @@ function initAmbient() {
   ambientAudio.loop = true;
   ambientAudio.preload = 'auto';
   ambientAudio.volume = 0.25;
-  ambientAudio.muted = desiredMuted; // ← par défaut : false = UNMUTED
+  ambientAudio.muted = desiredMuted;
   updateAudioIcon(desiredMuted);
-
   tryPlayAudio();
 
-  // garde la lecture quand on revient sur l’onglet
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && ambientAudio && !ambientAudio.muted) {
       tryPlayAudio();
@@ -715,11 +713,10 @@ function initAmbient() {
   });
 }
 
-// bouton 🔊 / 🔇
+// bouton texte
 if (audioToggle) {
   audioToggle.addEventListener('click', () => {
     if (!ambientAudio) return;
-    desiredMuted = !ambientAudio.muted;
     ambientAudio.muted = !ambientAudio.muted;
     localStorage.setItem(LS_AUDIO_KEY, String(ambientAudio.muted));
     updateAudioIcon(ambientAudio.muted);
